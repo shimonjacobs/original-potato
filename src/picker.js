@@ -1,6 +1,6 @@
 /* The two things Jev is asked. Jev returns typed answers with probabilities,
  * never text, and can only choose among the dishes it is shown.
- *   readText: what does the typed message mean? (soft preferences, "not this one")
+ *   readText: what does the typed message mean? (preferences, "not this one", did they name a dish)
  *   pick:     which shortlisted dish fits best right now? */
 const Picker = (function () {
   const NONE = "The user expressed no preference on this.";
@@ -31,6 +31,8 @@ const Picker = (function () {
       }),
       weight: dimChoice("heavy or light", Dishes.VOCAB.weight),
       temperature: dimChoice("hot or cold", Dishes.VOCAB.temperature),
+      names_dish: Ai.noulQ("Does the user ask for one specific dish or food by name (for example 'sushi' or 'pizza'), as opposed to describing what they fancy (for example 'something cold')?",
+        "They name a specific dish or food.", "They do not name a specific dish or food."),
       quick: Ai.noulQ("Does the user want something fast to make?", "They want something quick.", "Speed is not mentioned."),
       healthy: Ai.noulQ("Does the user want something healthy?", "They want something healthy.", "Healthiness is not mentioned."),
       comfort: Ai.noulQ("Does the user want comfort food?", "They want something comforting.", "Comfort food is not mentioned."),
@@ -45,7 +47,7 @@ const Picker = (function () {
       ["quick", "healthy", "comfort", "fancy"].forEach(function (f) {
         if (Ai.yes(a, f) >= Config.FLAG_THRESHOLD) prefs.push({ dimension: "occasion", value: f, src: "jev" });
       });
-      return { rejectsLast: Ai.yes(a, "rejects_last") >= Config.FLAG_THRESHOLD, prefs: prefs };
+      return { rejectsLast: Ai.yes(a, "rejects_last") >= Config.FLAG_THRESHOLD, namesDish: Ai.yes(a, "names_dish") >= Config.FLAG_THRESHOLD, prefs: prefs };
     });
   }
 

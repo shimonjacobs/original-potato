@@ -7,9 +7,9 @@ One self-contained file: open `dist/food-chooser.html` in any browser. No instal
 ## How it works
 
 1. Nothing is suggested until the user presses **I'm hungry**. Then they can tap **I'll have this**, **Not this one**, or optionally type what they fancy.
-2. **Rules** (`src/rules.js`) decide what is allowed. There is one hard rule: when **I'm meaty** is switched on (top right), milky dishes are never offered. Everything else only changes the ranking: time of day, what was asked for, and meals eaten recently (a weak nudge, never an exclusion).
+2. **Rules** (`src/rules.js`) decide what is allowed. There is one hard rule: when **I'm meaty** is switched on (top right), milky dishes are never offered. What the user asks for ("cold", "light") narrows the choice while any matching dish is left. If all of them have been offered, the app says so and offers **Show me anything** or **Choose from the list**, rather than offering something they ruled out. If nothing on the list matches everything they asked for, it offers the closest dish and says so. Time of day and meals eaten recently only change the ranking (recent meals are a weak nudge, never an exclusion).
 3. **Jev** (`typesafe/jev-1.13` via OpenRouter) reads typed words into preferences and picks one dish from the ranked shortlist. If the user names a dish ("pizza"), it always reaches Jev, marked as asked for. If it is blocked by the meaty rule, the reply says so and offers an **I'm not meaty now** button.
-4. **Claude Haiku** only words the reply: one dish, short and neutral. If Haiku is down, a template does it.
+4. **Claude Haiku** only words the reply: one dish, short and neutral. If Haiku is down, a template does it. If the user asks for a food that isn't on the list (Jev flags that a dish was named, and no list dish matches the name), the reply says "That isn't on your list" before suggesting something.
 5. After 3 "Not this one" the reply also offers **Choose from the list**.
 6. If Jev can't be reached (no internet, school network blocking it), the first press of I'm hungry switches the app to just the dish list with photos, no chat. Settings has **Try suggestions again**.
 

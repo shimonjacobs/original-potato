@@ -59,7 +59,9 @@ const ChatUI = (function () {
     try {
       const res = await Turn.run(App.session(), text, opts);
       if (res.offline) App.goOffline(res.errors.length ? Ai.explain(res.errors[0]) : "Suggestions aren't available.");
-      else bubble("assistant", res.reply, res.decision.dish ? cardFor(res.decision) : null, res.traceId);
+      else if (res.decision.action === "exhausted") {
+        bubble("assistant", res.reply, Dom.actions([{ action: "anything", label: "Show me anything", primary: true }, { action: "list", label: "Choose from the list" }]), res.traceId);
+      } else bubble("assistant", res.reply, res.decision.dish ? cardFor(res.decision) : null, res.traceId);
     } catch (err) {
       App.goOffline("Something went wrong: " + (err && err.message));
     }
@@ -96,6 +98,12 @@ const ChatUI = (function () {
     const dish = Dishes.byId(btn.getAttribute("data-id"));
     if (action === "eat") App.eat(btn);
     else if (action === "list") App.showPage("browse-page");
+    else if (action === "anything") {
+      App.session().prefs = [];
+      btn.closest(".card-actions").remove();
+      bubble("user", "Show me anything.");
+      send("", { action: "open" });
+    }
     else if (action === "reject") {
       btn.closest(".card-actions").remove();
       bubble("user", "Not this one.");

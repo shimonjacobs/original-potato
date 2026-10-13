@@ -200,6 +200,47 @@ async function main() {
     await app.Turn.run(S2, "something light", { hour: 13 });
     eq(S2.prefs.map(function (p) { return p.dimension + ":" + p.value; }), ["weight:light"]);
   });
+  await test("asked for cold: only cold dishes are offered, then it stops instead of offering a hot one", async function () {
+    const net = fakeNet({ haikuFails: true }), app = loadApp(net), S2 = app.Turn.newSession(); // template wording, so the reply is predictable
+    S2.prefs = [{ dimension: "temperature", value: "cold" }];
+    const cold = app.Dishes.all().filter(function (d) { return d.tags.temperature === "cold"; });
+    for (let i = 0; i < cold.length; i++) {
+      const res = await app.Turn.run(S2, "", { action: i ? "reject" : "open", hour: 13 });
+      eq(res.decision.dish.tags.temperature, "cold", "offered a non-cold dish");
+    }
+    const last = await app.Turn.run(S2, "", { action: "reject", hour: 13 });
+    eq(last.decision.action, "exhausted"); eq(last.decision.dish, undefined);
+    ok(/cold/.test(last.reply), "reply should say what ran out");
+  });
+  await test("nothing matches every preference: the closest dish is offered and the reply says so", async function () {
+    const app = loadApp(fakeNet()), S2 = app.Turn.newSession();
+    S2.prefs = [{ dimension: "temperature", value: "cold" }, { dimension: "weight", value: "heavy" }];
+    const res = await app.Turn.run(S2, "", { action: "open", hour: 13 });
+    eq(res.decision.closest, true);
+    ok(/Nothing on your list is exactly cold and heavy/.test(app.Wording.template(res.decision)));
+  });
+  await test("narrow: modes", function () {
+    const dishes = [D("pareve", ["lunch"], { id: "a" }), D("pareve", ["lunch"], { id: "b" })];
+    dishes[0].tags.temperature = "cold";
+    const cold = [{ dimension: "temperature", value: "cold" }];
+    eq(R.narrow(dishes, { meaty: false, offeredIds: [], prefs: [] }).mode, "all");
+    eq(R.narrow(dishes, { meaty: false, offeredIds: [], prefs: cold }).pool.map(function (d) { return d.id; }), ["a"]);
+    eq(R.narrow(dishes, { meaty: false, offeredIds: ["a"], prefs: cold }).mode, "exhausted");
+    eq(R.narrow(dishes, { meaty: false, offeredIds: [], prefs: [{ dimension: "weight", value: "heavy" }] }).mode, "closest");
+  });
+  await test("a food not on the list is acknowledged, a listed one is not", async function () {
+    const naming = { rejects_last: { noul: 0 }, names_dish: { noul: 0.95 }, kind: { choice: "none", confidence: 1 }, weight: { choice: "none", confidence: 1 }, temperature: { choice: "none", confidence: 1 } };
+    const app = loadApp(fakeNet({ reading: naming }));
+    const sushi = await app.Turn.run(app.Turn.newSession(), "sushi", { hour: 13 });
+    eq(sushi.decision.notOnList, true);
+    ok(/^That isn't on your list\./.test(app.Wording.template(sushi.decision)));
+    const pizza = await app.Turn.run(app.Turn.newSession(), "pizza", { hour: 13 });
+    eq(pizza.decision.notOnList, false);
+  });
+  await test("exhausted and acknowledgement wording", function () {
+    const W = loadApp(fakeNet()).Wording;
+    ok(/everything on your list that is cold/.test(W.template({ action: "exhausted", prefsText: "cold" })));
+  });
   await test("recent meals are told to Jev but never removed from the choice", async function () {
     const net = fakeNet(), app = loadApp(net);
     app.Store.recordEaten("chips");

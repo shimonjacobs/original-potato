@@ -18,7 +18,15 @@ const Dom = (function () {
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
   }
 
-  /* o: { highlight, blocked, tags, note, actions: [{ action, id, label, primary, disabled }] } */
+  /* actions: [{ action, id, label, primary, disabled }]; an action without its own id gets `defaultId`. */
+  function actions(list, defaultId) {
+    if (!list || !list.length) return "";
+    return '<div class="card-actions">' + list.map(function (a) {
+      return '<button type="button" class="' + (a.primary ? "primary" : "secondary") + '" data-action="' + a.action + '" data-id="' + esc(a.id || defaultId || "") + '"' + (a.disabled ? " disabled" : "") + ">" + esc(a.label) + "</button>";
+    }).join("") + "</div>";
+  }
+
+  /* o: { highlight, blocked, tags, note, actions: [...] } */
   function dishCard(dish, o) {
     o = o || {};
     const t = dish.tags;
@@ -29,16 +37,11 @@ const Dom = (function () {
         t.occasion.map(function (v) { return '<span class="tag tag-occ">' + v + "</span>"; }).join("") + "</div>" +
         '<div class="dish-meta">About ' + dish.prepTimeMinutes + " min</div>"
       : "";
-    const actions = o.actions && o.actions.length
-      ? '<div class="card-actions">' + o.actions.map(function (a) {
-        return '<button type="button" class="' + (a.primary ? "primary" : "secondary") + '" data-action="' + a.action + '" data-id="' + esc(a.id || dish.id) + '"' + (a.disabled ? " disabled" : "") + ">" + esc(a.label) + "</button>";
-      }).join("") + "</div>"
-      : "";
     return '<div class="dish-card' + (o.highlight ? " highlight" : "") + (o.blocked ? " blocked" : "") + '">' + img +
       "<h3>" + esc(dish.name) + "</h3>" +
       '<p class="dish-description">' + esc(dish.description) + "</p>" +
-      tags + (o.note ? '<div class="card-note">' + esc(o.note) + "</div>" : "") + actions + "</div>";
+      tags + (o.note ? '<div class="card-note">' + esc(o.note) + "</div>" : "") + actions(o.actions, dish.id) + "</div>";
   }
 
-  return { $: $, esc: esc, download: download, dishCard: dishCard };
+  return { $: $, esc: esc, download: download, actions: actions, dishCard: dishCard };
 })();

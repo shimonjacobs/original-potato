@@ -5,7 +5,9 @@
  *
  * If Jev can't be reached the turn comes back { offline: true } and the app
  * falls back to the plain list. If only Haiku fails, the template words it.
- * The meaty rule is enforced here by Rules, never left to a model. */
+ * The meaty rule is enforced here by Rules, never left to a model. If every dish
+ * matching what they asked for has been offered, the turn comes back
+ * { action: "exhausted" } with no dish instead of offering something they ruled out. */
 const Turn = (function () {
   function newSession() {
     return { history: [], meaty: false, ignoreTime: false, prefs: [], offeredIds: [], rejectedIds: [], lastDish: null };
@@ -35,6 +37,7 @@ const Turn = (function () {
     const meals = S.ignoreTime ? [] : Rules.mealsForHour(hour);
     let linkUp = Ai.available();
     let rejectsLast = opts.action === "reject";
+    let namesDish = false;
     const failed = function (step, e) { errors.push(e); if (Ai.isDead(e)) linkUp = false; Debug.step(step, "error", Ai.explain(e)); };
 
     S.history.push({ role: "user", content: text || (rejectsLast ? "Not this one." : opts.action === "open" ? "I'm hungry." : "(suggest something)") });
@@ -44,6 +47,7 @@ const Turn = (function () {
       try {
         const intent = await Picker.readText({ message: text, timeLabel: timeLabel, lastDishName: S.lastDish ? S.lastDish.name : null });
         if (intent.rejectsLast) rejectsLast = true;
+        namesDish = intent.namesDish;
         S.prefs = Rules.mergePrefs(S.prefs, intent.prefs);
         Debug.step("Jev's reading of the message", "ok", intent.prefs.map(function (p) { return p.dimension + ": " + p.value; }).join(", ") || "no preferences", intent);
       } catch (e) { failed("Jev's reading of the message", e); }
@@ -53,14 +57,20 @@ const Turn = (function () {
     // 2. Rules: what is allowed, and a ranked shortlist.
     const recentIds = Store.recentEaten().map(function (e) { return e.id; });
     const rank = { prefs: S.prefs, meals: meals, recentIds: recentIds };
-    const pool = Rules.pool(dishes, { meaty: S.meaty, offeredIds: S.offeredIds });
     const asked = text ? Rules.named(text, dishes) : [];
     const blocked = asked.filter(function (d) { return Rules.isBlocked(d, S.meaty); })[0] || null;
     const askedOk = asked.filter(function (d) { return !Rules.isBlocked(d, S.meaty); });
-    Debug.step("Rules", pool.length ? "ok" : "warn", pool.length + " of " + dishes.length + " dishes allowed" + (S.meaty ? " (meaty: no milky dishes)" : ""),
-      { meaty: S.meaty, ranking: Rules.explain(pool, rank).slice(0, 20), asked: asked.map(function (d) { return d.name; }), blocked: blocked ? blocked.name : null });
+    const base = { meaty: S.meaty, offeredIds: S.offeredIds, prefs: S.prefs };
+    let narrowed = Rules.narrow(dishes, base);
+    if (narrowed.mode === "exhausted" && askedOk.length) narrowed = { mode: "all", pool: Rules.pool(dishes, base) }; // they named a dish, so there is something to offer
+    const pool = narrowed.pool;
+    const prefsText = Rules.describePrefs(S.prefs);
+    Debug.step("Rules", pool.length ? "ok" : "warn", narrowed.mode + ": " + pool.length + " of " + dishes.length + " dishes allowed" + (S.meaty ? " (meaty: no milky dishes)" : ""),
+      { meaty: S.meaty, mode: narrowed.mode, ranking: Rules.explain(pool, rank).slice(0, 20), asked: asked.map(function (d) { return d.name; }), blocked: blocked ? blocked.name : null });
 
-    if (!pool.length) return finish(S, { action: "nothing", timeLabel: timeLabel, blocked: null, rejectedPrevious: rejectsLast }, errors, linkUp);
+    // Nothing more matches what they asked for: say so, don't offer something they ruled out.
+    if (narrowed.mode === "exhausted") return finish(S, { action: "exhausted", timeLabel: timeLabel, prefsText: prefsText }, errors, linkUp);
+    if (!pool.length) return finish(S, { action: "nothing", timeLabel: timeLabel }, errors, linkUp);
 
     let shortlist = Rules.shortlist(pool, rank, Config.MAX_CANDIDATES, opts.rng);
     askedOk.forEach(function (d) { if (shortlist.indexOf(d) === -1) shortlist.push(d); }); // a dish they named always reaches Jev
@@ -84,6 +94,7 @@ const Turn = (function () {
     S.lastDish = dish;
     return finish(S, {
       action: "recommend", dish: dish, blocked: blocked, rejectedPrevious: rejectsLast, timeLabel: timeLabel,
+      notOnList: namesDish && !asked.length, closest: narrowed.mode === "closest", prefsText: prefsText,
       confidence: pick.confidence, runnersUp: pick.others.map(Dishes.byId),
       offerList: S.rejectedIds.length >= Config.REJECTS_BEFORE_LIST
     }, errors, linkUp);

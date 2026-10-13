@@ -692,10 +692,10 @@ const Dishes = (function () {
 /* ---- src/rules.js ---- */
 /* The deterministic rules. Pure functions: no storage, no network, no DOM.
  *
- * Hard rule (the only one): when the user is meaty, milky dishes are never
- * offered. Everything else is a soft preference that only changes the ranking:
- * time of day, what they asked for, and what they ate recently. Jev then picks
- * among the shortlist; nothing outside the user's list is ever offered. */
+ * Hard rule: when the user is meaty, milky dishes are never offered.
+ * What they ask for ("cold", "light") narrows the choice while any matching dish
+ * is left (see narrow). Time of day and recent meals only change the ranking.
+ * Jev then picks among the shortlist; nothing outside the user's list is ever offered. */
 const Rules = (function () {
   /* [from hour, to hour, meal types that suit it, label] */
   const WINDOWS = [
@@ -744,6 +744,27 @@ const Rules = (function () {
     return fresh.length ? fresh : allowed;
   }
 
+  /* Stated preferences decide what is offered while any matching dish is left, so a
+   * "cold" request never turns into a hot dish just because the cold one was used up.
+   *   mode "all":       no preferences, so use the pool as it is
+   *   mode "match":     dishes that match every preference and haven't been offered
+   *   mode "exhausted": matching dishes exist but all were offered, so there is nothing more to suggest
+   *   mode "closest":   no dish matches every preference, so rank by how many each matches */
+  function narrow(dishes, o) {
+    if (!o.prefs.length) return { mode: "all", pool: pool(dishes, o) };
+    const matching = dishes.filter(function (d) { return !isBlocked(d, o.meaty) && o.prefs.every(function (p) { return matchesPref(d, p); }); });
+    const fresh = matching.filter(function (d) { return o.offeredIds.indexOf(d.id) === -1; });
+    if (fresh.length) return { mode: "match", pool: fresh };
+    if (matching.length) return { mode: "exhausted", pool: [] };
+    return { mode: "closest", pool: pool(dishes, o) };
+  }
+
+  /* "cold and heavy", for replies. */
+  function describePrefs(prefs) {
+    const words = { "not-meaty": "meat-free", comfort: "comfort food" };
+    return prefs.map(function (p) { return words[p.value] || p.value; }).join(" and ");
+  }
+
   /* Each matched preference is worth 1, suiting the meal is worth TIME_WEIGHT,
    * a recent meal loses RECENT_PENALTY. Weak on purpose: regular foods stay on the table. */
   function score(dish, o) {
@@ -786,7 +807,7 @@ const Rules = (function () {
   return {
     mealsForHour: mealsForHour, labelForHour: labelForHour,
     isBlocked: isBlocked, fitsMeal: fitsMeal, matchesPref: matchesPref, mergePrefs: mergePrefs,
-    pool: pool, score: score, shortlist: shortlist, explain: explain, named: named
+    pool: pool, narrow: narrow, describePrefs: describePrefs, score: score, shortlist: shortlist, explain: explain, named: named
   };
 })();
 
@@ -898,7 +919,7 @@ const Ai = (function () {
 /* ---- src/picker.js ---- */
 /* The two things Jev is asked. Jev returns typed answers with probabilities,
  * never text, and can only choose among the dishes it is shown.
- *   readText: what does the typed message mean? (soft preferences, "not this one")
+ *   readText: what does the typed message mean? (preferences, "not this one", did they name a dish)
  *   pick:     which shortlisted dish fits best right now? */
 const Picker = (function () {
   const NONE = "The user expressed no preference on this.";
@@ -929,6 +950,8 @@ const Picker = (function () {
       }),
       weight: dimChoice("heavy or light", Dishes.VOCAB.weight),
       temperature: dimChoice("hot or cold", Dishes.VOCAB.temperature),
+      names_dish: Ai.noulQ("Does the user ask for one specific dish or food by name (for example 'sushi' or 'pizza'), as opposed to describing what they fancy (for example 'something cold')?",
+        "They name a specific dish or food.", "They do not name a specific dish or food."),
       quick: Ai.noulQ("Does the user want something fast to make?", "They want something quick.", "Speed is not mentioned."),
       healthy: Ai.noulQ("Does the user want something healthy?", "They want something healthy.", "Healthiness is not mentioned."),
       comfort: Ai.noulQ("Does the user want comfort food?", "They want something comforting.", "Comfort food is not mentioned."),
@@ -943,7 +966,7 @@ const Picker = (function () {
       ["quick", "healthy", "comfort", "fancy"].forEach(function (f) {
         if (Ai.yes(a, f) >= Config.FLAG_THRESHOLD) prefs.push({ dimension: "occasion", value: f, src: "jev" });
       });
-      return { rejectsLast: Ai.yes(a, "rejects_last") >= Config.FLAG_THRESHOLD, prefs: prefs };
+      return { rejectsLast: Ai.yes(a, "rejects_last") >= Config.FLAG_THRESHOLD, namesDish: Ai.yes(a, "names_dish") >= Config.FLAG_THRESHOLD, prefs: prefs };
     });
   }
 
@@ -985,12 +1008,16 @@ const Picker = (function () {
  * is told exactly which dish to mention; the template below is used when Haiku
  * is unavailable. Replies are kept short, neutral and free of pressure. */
 const Wording = (function () {
-  /* decision: { action: "recommend" | "nothing", dish, blocked, rejectedPrevious, timeLabel } */
+  /* decision: { action: "recommend" | "exhausted" | "nothing", dish, blocked, rejectedPrevious, notOnList, closest, prefsText, timeLabel } */
   function template(d) {
     if (d.action === "nothing") return "Everything on your list has dairy, and meaty is on. You can switch meaty off if you're ready.";
-    const ask = "How about " + d.dish.name + "? " + d.dish.description;
-    if (d.blocked) return d.blocked.name + " has dairy, and meaty is on. " + ask;
-    return (d.rejectedPrevious ? "OK. " : "") + ask;
+    if (d.action === "exhausted") return "That's everything on your list that is " + d.prefsText + ". Want to see anything else, or choose from the list?";
+    let lead = "";
+    if (d.blocked) lead = d.blocked.name + " has dairy, and meaty is on. ";
+    else if (d.notOnList) lead = "That isn't on your list. ";
+    else if (d.rejectedPrevious) lead = "OK. ";
+    const close = d.closest ? "Nothing on your list is exactly " + d.prefsText + ", so here's the closest. " : "";
+    return lead + close + "How about " + d.dish.name + "? " + d.dish.description;
   }
 
   const SYSTEM = [
@@ -1001,13 +1028,17 @@ const Wording = (function () {
     "- Be calm and neutral. Never pressure, never mention health, nutrition, variety, trying new foods or what they should eat.",
     "- If rejectedPrevious is true, start with a light \"OK\" or \"No problem\".",
     "- If blocked is set, the user asked for that dish but it has dairy and they are meaty right now. Say so in a few words, then suggest dish.name instead. Do not lecture.",
+    "- If notOnList is true, the user asked for a food that isn't on their list: say so in a few words, then suggest dish.name.",
+    "- If closest is true, nothing on their list is exactly prefsText: say that in a few words and present dish.name as the closest.",
+    "- If action is \"exhausted\", there is no dish: say that is everything on their list that is prefsText, and ask if they would like to see anything else or choose from the list. Do not suggest a dish.",
     "- If action is \"nothing\", say everything on their list has dairy and meaty is on, and that they can switch meaty off.",
     "- If timeLabel is null, do not mention the time of day.",
     "- Never mention the engine, JSON, or probabilities."
   ].join("\n");
 
   function forModel(d) {
-    return { action: d.action, dish: d.dish ? { name: d.dish.name, description: d.dish.description } : null, blocked: d.blocked ? d.blocked.name : null, rejectedPrevious: !!d.rejectedPrevious, timeLabel: d.timeLabel || null };
+    return { action: d.action, dish: d.dish ? { name: d.dish.name, description: d.dish.description } : null, blocked: d.blocked ? d.blocked.name : null, rejectedPrevious: !!d.rejectedPrevious,
+      notOnList: !!d.notOnList, closest: !!d.closest, prefsText: d.prefsText || null, timeLabel: d.timeLabel || null };
   }
 
   /* history: [{ role, content }] ending with the user's turn. */
@@ -1031,7 +1062,9 @@ const Wording = (function () {
  *
  * If Jev can't be reached the turn comes back { offline: true } and the app
  * falls back to the plain list. If only Haiku fails, the template words it.
- * The meaty rule is enforced here by Rules, never left to a model. */
+ * The meaty rule is enforced here by Rules, never left to a model. If every dish
+ * matching what they asked for has been offered, the turn comes back
+ * { action: "exhausted" } with no dish instead of offering something they ruled out. */
 const Turn = (function () {
   function newSession() {
     return { history: [], meaty: false, ignoreTime: false, prefs: [], offeredIds: [], rejectedIds: [], lastDish: null };
@@ -1061,6 +1094,7 @@ const Turn = (function () {
     const meals = S.ignoreTime ? [] : Rules.mealsForHour(hour);
     let linkUp = Ai.available();
     let rejectsLast = opts.action === "reject";
+    let namesDish = false;
     const failed = function (step, e) { errors.push(e); if (Ai.isDead(e)) linkUp = false; Debug.step(step, "error", Ai.explain(e)); };
 
     S.history.push({ role: "user", content: text || (rejectsLast ? "Not this one." : opts.action === "open" ? "I'm hungry." : "(suggest something)") });
@@ -1070,6 +1104,7 @@ const Turn = (function () {
       try {
         const intent = await Picker.readText({ message: text, timeLabel: timeLabel, lastDishName: S.lastDish ? S.lastDish.name : null });
         if (intent.rejectsLast) rejectsLast = true;
+        namesDish = intent.namesDish;
         S.prefs = Rules.mergePrefs(S.prefs, intent.prefs);
         Debug.step("Jev's reading of the message", "ok", intent.prefs.map(function (p) { return p.dimension + ": " + p.value; }).join(", ") || "no preferences", intent);
       } catch (e) { failed("Jev's reading of the message", e); }
@@ -1079,14 +1114,20 @@ const Turn = (function () {
     // 2. Rules: what is allowed, and a ranked shortlist.
     const recentIds = Store.recentEaten().map(function (e) { return e.id; });
     const rank = { prefs: S.prefs, meals: meals, recentIds: recentIds };
-    const pool = Rules.pool(dishes, { meaty: S.meaty, offeredIds: S.offeredIds });
     const asked = text ? Rules.named(text, dishes) : [];
     const blocked = asked.filter(function (d) { return Rules.isBlocked(d, S.meaty); })[0] || null;
     const askedOk = asked.filter(function (d) { return !Rules.isBlocked(d, S.meaty); });
-    Debug.step("Rules", pool.length ? "ok" : "warn", pool.length + " of " + dishes.length + " dishes allowed" + (S.meaty ? " (meaty: no milky dishes)" : ""),
-      { meaty: S.meaty, ranking: Rules.explain(pool, rank).slice(0, 20), asked: asked.map(function (d) { return d.name; }), blocked: blocked ? blocked.name : null });
+    const base = { meaty: S.meaty, offeredIds: S.offeredIds, prefs: S.prefs };
+    let narrowed = Rules.narrow(dishes, base);
+    if (narrowed.mode === "exhausted" && askedOk.length) narrowed = { mode: "all", pool: Rules.pool(dishes, base) }; // they named a dish, so there is something to offer
+    const pool = narrowed.pool;
+    const prefsText = Rules.describePrefs(S.prefs);
+    Debug.step("Rules", pool.length ? "ok" : "warn", narrowed.mode + ": " + pool.length + " of " + dishes.length + " dishes allowed" + (S.meaty ? " (meaty: no milky dishes)" : ""),
+      { meaty: S.meaty, mode: narrowed.mode, ranking: Rules.explain(pool, rank).slice(0, 20), asked: asked.map(function (d) { return d.name; }), blocked: blocked ? blocked.name : null });
 
-    if (!pool.length) return finish(S, { action: "nothing", timeLabel: timeLabel, blocked: null, rejectedPrevious: rejectsLast }, errors, linkUp);
+    // Nothing more matches what they asked for: say so, don't offer something they ruled out.
+    if (narrowed.mode === "exhausted") return finish(S, { action: "exhausted", timeLabel: timeLabel, prefsText: prefsText }, errors, linkUp);
+    if (!pool.length) return finish(S, { action: "nothing", timeLabel: timeLabel }, errors, linkUp);
 
     let shortlist = Rules.shortlist(pool, rank, Config.MAX_CANDIDATES, opts.rng);
     askedOk.forEach(function (d) { if (shortlist.indexOf(d) === -1) shortlist.push(d); }); // a dish they named always reaches Jev
@@ -1110,6 +1151,7 @@ const Turn = (function () {
     S.lastDish = dish;
     return finish(S, {
       action: "recommend", dish: dish, blocked: blocked, rejectedPrevious: rejectsLast, timeLabel: timeLabel,
+      notOnList: namesDish && !asked.length, closest: narrowed.mode === "closest", prefsText: prefsText,
       confidence: pick.confidence, runnersUp: pick.others.map(Dishes.byId),
       offerList: S.rejectedIds.length >= Config.REJECTS_BEFORE_LIST
     }, errors, linkUp);
@@ -1224,7 +1266,15 @@ const Dom = (function () {
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
   }
 
-  /* o: { highlight, blocked, tags, note, actions: [{ action, id, label, primary, disabled }] } */
+  /* actions: [{ action, id, label, primary, disabled }]; an action without its own id gets `defaultId`. */
+  function actions(list, defaultId) {
+    if (!list || !list.length) return "";
+    return '<div class="card-actions">' + list.map(function (a) {
+      return '<button type="button" class="' + (a.primary ? "primary" : "secondary") + '" data-action="' + a.action + '" data-id="' + esc(a.id || defaultId || "") + '"' + (a.disabled ? " disabled" : "") + ">" + esc(a.label) + "</button>";
+    }).join("") + "</div>";
+  }
+
+  /* o: { highlight, blocked, tags, note, actions: [...] } */
   function dishCard(dish, o) {
     o = o || {};
     const t = dish.tags;
@@ -1235,18 +1285,13 @@ const Dom = (function () {
         t.occasion.map(function (v) { return '<span class="tag tag-occ">' + v + "</span>"; }).join("") + "</div>" +
         '<div class="dish-meta">About ' + dish.prepTimeMinutes + " min</div>"
       : "";
-    const actions = o.actions && o.actions.length
-      ? '<div class="card-actions">' + o.actions.map(function (a) {
-        return '<button type="button" class="' + (a.primary ? "primary" : "secondary") + '" data-action="' + a.action + '" data-id="' + esc(a.id || dish.id) + '"' + (a.disabled ? " disabled" : "") + ">" + esc(a.label) + "</button>";
-      }).join("") + "</div>"
-      : "";
     return '<div class="dish-card' + (o.highlight ? " highlight" : "") + (o.blocked ? " blocked" : "") + '">' + img +
       "<h3>" + esc(dish.name) + "</h3>" +
       '<p class="dish-description">' + esc(dish.description) + "</p>" +
-      tags + (o.note ? '<div class="card-note">' + esc(o.note) + "</div>" : "") + actions + "</div>";
+      tags + (o.note ? '<div class="card-note">' + esc(o.note) + "</div>" : "") + actions(o.actions, dish.id) + "</div>";
   }
 
-  return { $: $, esc: esc, download: download, dishCard: dishCard };
+  return { $: $, esc: esc, download: download, actions: actions, dishCard: dishCard };
 })();
 
 
@@ -1312,7 +1357,9 @@ const ChatUI = (function () {
     try {
       const res = await Turn.run(App.session(), text, opts);
       if (res.offline) App.goOffline(res.errors.length ? Ai.explain(res.errors[0]) : "Suggestions aren't available.");
-      else bubble("assistant", res.reply, res.decision.dish ? cardFor(res.decision) : null, res.traceId);
+      else if (res.decision.action === "exhausted") {
+        bubble("assistant", res.reply, Dom.actions([{ action: "anything", label: "Show me anything", primary: true }, { action: "list", label: "Choose from the list" }]), res.traceId);
+      } else bubble("assistant", res.reply, res.decision.dish ? cardFor(res.decision) : null, res.traceId);
     } catch (err) {
       App.goOffline("Something went wrong: " + (err && err.message));
     }
@@ -1349,6 +1396,12 @@ const ChatUI = (function () {
     const dish = Dishes.byId(btn.getAttribute("data-id"));
     if (action === "eat") App.eat(btn);
     else if (action === "list") App.showPage("browse-page");
+    else if (action === "anything") {
+      App.session().prefs = [];
+      btn.closest(".card-actions").remove();
+      bubble("user", "Show me anything.");
+      send("", { action: "open" });
+    }
     else if (action === "reject") {
       btn.closest(".card-actions").remove();
       bubble("user", "Not this one.");

@@ -1,9 +1,9 @@
 /* The deterministic rules. Pure functions: no storage, no network, no DOM.
  *
- * Hard rule (the only one): when the user is meaty, milky dishes are never
- * offered. Everything else is a soft preference that only changes the ranking:
- * time of day, what they asked for, and what they ate recently. Jev then picks
- * among the shortlist; nothing outside the user's list is ever offered. */
+ * Hard rule: when the user is meaty, milky dishes are never offered.
+ * What they ask for ("cold", "light") narrows the choice while any matching dish
+ * is left (see narrow). Time of day and recent meals only change the ranking.
+ * Jev then picks among the shortlist; nothing outside the user's list is ever offered. */
 const Rules = (function () {
   /* [from hour, to hour, meal types that suit it, label] */
   const WINDOWS = [
@@ -52,6 +52,27 @@ const Rules = (function () {
     return fresh.length ? fresh : allowed;
   }
 
+  /* Stated preferences decide what is offered while any matching dish is left, so a
+   * "cold" request never turns into a hot dish just because the cold one was used up.
+   *   mode "all":       no preferences, so use the pool as it is
+   *   mode "match":     dishes that match every preference and haven't been offered
+   *   mode "exhausted": matching dishes exist but all were offered, so there is nothing more to suggest
+   *   mode "closest":   no dish matches every preference, so rank by how many each matches */
+  function narrow(dishes, o) {
+    if (!o.prefs.length) return { mode: "all", pool: pool(dishes, o) };
+    const matching = dishes.filter(function (d) { return !isBlocked(d, o.meaty) && o.prefs.every(function (p) { return matchesPref(d, p); }); });
+    const fresh = matching.filter(function (d) { return o.offeredIds.indexOf(d.id) === -1; });
+    if (fresh.length) return { mode: "match", pool: fresh };
+    if (matching.length) return { mode: "exhausted", pool: [] };
+    return { mode: "closest", pool: pool(dishes, o) };
+  }
+
+  /* "cold and heavy", for replies. */
+  function describePrefs(prefs) {
+    const words = { "not-meaty": "meat-free", comfort: "comfort food" };
+    return prefs.map(function (p) { return words[p.value] || p.value; }).join(" and ");
+  }
+
   /* Each matched preference is worth 1, suiting the meal is worth TIME_WEIGHT,
    * a recent meal loses RECENT_PENALTY. Weak on purpose: regular foods stay on the table. */
   function score(dish, o) {
@@ -94,6 +115,6 @@ const Rules = (function () {
   return {
     mealsForHour: mealsForHour, labelForHour: labelForHour,
     isBlocked: isBlocked, fitsMeal: fitsMeal, matchesPref: matchesPref, mergePrefs: mergePrefs,
-    pool: pool, score: score, shortlist: shortlist, explain: explain, named: named
+    pool: pool, narrow: narrow, describePrefs: describePrefs, score: score, shortlist: shortlist, explain: explain, named: named
   };
 })();
