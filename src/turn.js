@@ -10,10 +10,14 @@
  * { action: "exhausted" } with no dish instead of offering something they ruled out. */
 const Turn = (function () {
   function newSession() {
-    return { history: [], meaty: false, ignoreTime: false, prefs: [], offeredIds: [], rejectedIds: [], lastDish: null };
+    return {
+      history: [], meaty: false, ignoreTime: false, prefs: [], offeredIds: [], rejectedIds: [], lastDish: null,
+      lastRequest: "",  // the last thing they typed, kept so "Not this one" still knows what they wanted
+      asked: [], askedLabel: ""  // ids of the dishes their words matched ("eggs" gives every egg dish), and the wording
+    };
   }
 
-  /* opts: { action: "open" (the I'm hungry button) | "reject" | "refresh" (omit for typed text), hour, rng } */
+  /* opts: { action: "open" (the I'm hungry button) | "reject" | "refresh" (omit for typed text), chip (text came from a quick chip), hour, rng } */
   async function run(S, text, opts) {
     opts = opts || {};
     const hour = typeof opts.hour === "number" ? opts.hour : new Date().getHours();
@@ -42,7 +46,7 @@ const Turn = (function () {
 
     S.history.push({ role: "user", content: text || (rejectsLast ? "Not this one." : opts.action === "open" ? "I'm hungry." : "(suggest something)") });
 
-    // 1. Jev reads typed words into soft preferences.
+    // 1. Jev reads typed words into preferences.
     if (text && linkUp) {
       try {
         const intent = await Picker.readText({ message: text, timeLabel: timeLabel, lastDishName: S.lastDish ? S.lastDish.name : null });
@@ -54,34 +58,45 @@ const Turn = (function () {
     }
     if (rejectsLast && S.lastDish && S.rejectedIds.indexOf(S.lastDish.id) === -1) S.rejectedIds.push(S.lastDish.id);
 
-    // 2. Rules: what is allowed, and a ranked shortlist.
+    // 2. Remember what they asked for. A new request that names dishes or ingredients replaces the
+    //    old one; a request for a food that isn't on the list clears it. Either way "Not this one"
+    //    keeps working from the current request.
+    const typed = text ? Rules.findAsked(text, dishes) : { dishes: [], term: "" };
+    if (typed.dishes.length) {
+      S.asked = typed.dishes.map(function (d) { return d.id; });
+      S.askedLabel = typed.term;
+      // asking for a dish again after turning it down counts as changing their mind
+      S.offeredIds = S.offeredIds.filter(function (id) { return S.asked.indexOf(id) === -1; });
+      S.rejectedIds = S.rejectedIds.filter(function (id) { return S.asked.indexOf(id) === -1; });
+    } else if (namesDish) { S.asked = []; S.askedLabel = ""; }
+    if (text && !opts.chip) S.lastRequest = text;
+
+    // 3. Rules: what is allowed, and a ranked shortlist.
     const recentIds = Store.recentEaten().map(function (e) { return e.id; });
     const rank = { prefs: S.prefs, meals: meals, recentIds: recentIds };
-    const asked = text ? Rules.named(text, dishes) : [];
-    const blocked = asked.filter(function (d) { return Rules.isBlocked(d, S.meaty); })[0] || null;
-    const askedOk = asked.filter(function (d) { return !Rules.isBlocked(d, S.meaty); });
-    const base = { meaty: S.meaty, offeredIds: S.offeredIds, prefs: S.prefs };
-    let narrowed = Rules.narrow(dishes, base);
-    if (narrowed.mode === "exhausted" && askedOk.length) narrowed = { mode: "all", pool: Rules.pool(dishes, base) }; // they named a dish, so there is something to offer
+    const askedDishes = S.asked.map(Dishes.byId).filter(Boolean);
+    const askedOk = askedDishes.filter(function (d) { return !Rules.isBlocked(d, S.meaty); });
+    const blocked = typed.dishes.length && !askedOk.length ? askedDishes[0] : null; // they asked for something the meaty rule blocks
+    const narrowed = Rules.narrow(dishes, { meaty: S.meaty, offeredIds: S.offeredIds, prefs: S.prefs, asked: askedOk.map(function (d) { return d.id; }) });
     const pool = narrowed.pool;
     const prefsText = Rules.describePrefs(S.prefs);
     Debug.step("Rules", pool.length ? "ok" : "warn", narrowed.mode + ": " + pool.length + " of " + dishes.length + " dishes allowed" + (S.meaty ? " (meaty: no milky dishes)" : ""),
-      { meaty: S.meaty, mode: narrowed.mode, ranking: Rules.explain(pool, rank).slice(0, 20), asked: asked.map(function (d) { return d.name; }), blocked: blocked ? blocked.name : null });
+      { meaty: S.meaty, mode: narrowed.mode, ranking: Rules.explain(pool, rank).slice(0, 20), asked: askedDishes.map(function (d) { return d.name; }), askedLabel: S.askedLabel, blocked: blocked ? blocked.name : null });
 
     // Nothing more matches what they asked for: say so, don't offer something they ruled out.
-    if (narrowed.mode === "exhausted") return finish(S, { action: "exhausted", timeLabel: timeLabel, prefsText: prefsText }, errors, linkUp);
+    if (narrowed.mode === "exhausted") return finish(S, { action: "exhausted", timeLabel: timeLabel, prefsText: prefsText, askedLabel: S.askedLabel }, errors, linkUp);
     if (!pool.length) return finish(S, { action: "nothing", timeLabel: timeLabel }, errors, linkUp);
 
-    let shortlist = Rules.shortlist(pool, rank, Config.MAX_CANDIDATES, opts.rng);
-    askedOk.forEach(function (d) { if (shortlist.indexOf(d) === -1) shortlist.push(d); }); // a dish they named always reaches Jev
+    const shortlist = Rules.shortlist(pool, rank, Config.MAX_CANDIDATES, opts.rng);
 
-    // 3. Jev picks.
+    // 4. Jev picks.
     let pick = null;
     if (shortlist.length === 1) pick = { id: shortlist[0].id, confidence: 1, others: [] };
     else if (linkUp) {
       try {
         pick = await Picker.pick(shortlist, {
-          message: text || "Suggest something.", timeLabel: timeLabel, prefs: S.prefs, meals: meals, asked: askedOk.map(function (d) { return d.name; }),
+          message: text || "Suggest something.", original: S.lastRequest, timeLabel: timeLabel, prefs: S.prefs, meals: meals,
+          asked: narrowed.mode === "match" && askedOk.length ? shortlist.map(function (d) { return d.name; }) : [],
           recentlyEaten: recentIds.map(Dishes.nameOf), rejected: S.rejectedIds.map(Dishes.nameOf), offered: S.offeredIds.map(Dishes.nameOf)
         });
         Debug.step("Jev's pick", "ok", Dishes.nameOf(pick.id) + " at " + Math.round(pick.confidence * 100) + "% confidence", pick);
@@ -94,7 +109,7 @@ const Turn = (function () {
     S.lastDish = dish;
     return finish(S, {
       action: "recommend", dish: dish, blocked: blocked, rejectedPrevious: rejectsLast, timeLabel: timeLabel,
-      notOnList: namesDish && !asked.length, closest: narrowed.mode === "closest", prefsText: prefsText,
+      notOnList: namesDish && !typed.dishes.length, closest: narrowed.mode === "closest", prefsText: prefsText,
       confidence: pick.confidence, runnersUp: pick.others.map(Dishes.byId),
       offerList: S.rejectedIds.length >= Config.REJECTS_BEFORE_LIST
     }, errors, linkUp);

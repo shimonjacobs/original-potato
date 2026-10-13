@@ -2,10 +2,13 @@
  * is told exactly which dish to mention; the template below is used when Haiku
  * is unavailable. Replies are kept short, neutral and free of pressure. */
 const Wording = (function () {
-  /* decision: { action: "recommend" | "exhausted" | "nothing", dish, blocked, rejectedPrevious, notOnList, closest, prefsText, timeLabel } */
+  /* decision: { action: "recommend" | "exhausted" | "nothing", dish, blocked, rejectedPrevious, notOnList, closest, prefsText, askedLabel, timeLabel } */
   function template(d) {
     if (d.action === "nothing") return "Everything on your list has dairy, and meaty is on. You can switch meaty off if you're ready.";
-    if (d.action === "exhausted") return "That's everything on your list that is " + d.prefsText + ". Want to see anything else, or choose from the list?";
+    if (d.action === "exhausted") {
+      const what = d.askedLabel ? "matches \"" + d.askedLabel + "\"" + (d.prefsText ? " and is " + d.prefsText : "") : "is " + d.prefsText;
+      return "That's everything on your list that " + what + ". Want to see anything else, or choose from the list?";
+    }
     let lead = "";
     if (d.blocked) lead = d.blocked.name + " has dairy, and meaty is on. ";
     else if (d.notOnList) lead = "That isn't on your list. ";
@@ -24,7 +27,7 @@ const Wording = (function () {
     "- If blocked is set, the user asked for that dish but it has dairy and they are meaty right now. Say so in a few words, then suggest dish.name instead. Do not lecture.",
     "- If notOnList is true, the user asked for a food that isn't on their list: say so in a few words, then suggest dish.name.",
     "- If closest is true, nothing on their list is exactly prefsText: say that in a few words and present dish.name as the closest.",
-    "- If action is \"exhausted\", there is no dish: say that is everything on their list that is prefsText, and ask if they would like to see anything else or choose from the list. Do not suggest a dish.",
+    "- If action is \"exhausted\", there is no dish: say that is everything on their list that matches askedLabel (if given) and is prefsText (if given), and ask if they would like to see anything else or choose from the list. Do not suggest a dish.",
     "- If action is \"nothing\", say everything on their list has dairy and meaty is on, and that they can switch meaty off.",
     "- If timeLabel is null, do not mention the time of day.",
     "- Never mention the engine, JSON, or probabilities."
@@ -32,7 +35,7 @@ const Wording = (function () {
 
   function forModel(d) {
     return { action: d.action, dish: d.dish ? { name: d.dish.name, description: d.dish.description } : null, blocked: d.blocked ? d.blocked.name : null, rejectedPrevious: !!d.rejectedPrevious,
-      notOnList: !!d.notOnList, closest: !!d.closest, prefsText: d.prefsText || null, timeLabel: d.timeLabel || null };
+      notOnList: !!d.notOnList, closest: !!d.closest, prefsText: d.prefsText || null, askedLabel: d.askedLabel || null, timeLabel: d.timeLabel || null };
   }
 
   /* history: [{ role, content }] ending with the user's turn. */

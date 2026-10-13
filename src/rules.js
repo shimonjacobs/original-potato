@@ -52,13 +52,20 @@ const Rules = (function () {
     return fresh.length ? fresh : allowed;
   }
 
-  /* Stated preferences decide what is offered while any matching dish is left, so a
-   * "cold" request never turns into a hot dish just because the cold one was used up.
-   *   mode "all":       no preferences, so use the pool as it is
-   *   mode "match":     dishes that match every preference and haven't been offered
+  /* What the user asked for decides what is offered while any matching dish is left, so a
+   * "cold" or "eggs" request never turns into something else just because the matching
+   * dish was used up. o.asked is the ids of dishes their words matched (see findAsked).
+   *   mode "all":       nothing asked for, so use the pool as it is
+   *   mode "match":     dishes that match what they asked for and haven't been offered
    *   mode "exhausted": matching dishes exist but all were offered, so there is nothing more to suggest
    *   mode "closest":   no dish matches every preference, so rank by how many each matches */
   function narrow(dishes, o) {
+    if (o.asked.length) {
+      const wanted = dishes.filter(function (d) { return o.asked.indexOf(d.id) !== -1 && !isBlocked(d, o.meaty); });
+      const left = wanted.filter(function (d) { return o.offeredIds.indexOf(d.id) === -1; });
+      if (left.length) return { mode: "match", pool: left };
+      if (wanted.length) return { mode: "exhausted", pool: [] };
+    }
     if (!o.prefs.length) return { mode: "all", pool: pool(dishes, o) };
     const matching = dishes.filter(function (d) { return !isBlocked(d, o.meaty) && o.prefs.every(function (p) { return matchesPref(d, p); }); });
     const fresh = matching.filter(function (d) { return o.offeredIds.indexOf(d.id) === -1; });
@@ -96,25 +103,43 @@ const Rules = (function () {
     return candidates.map(function (d) { return { name: d.name, score: score(d, o) }; }).sort(function (a, b) { return b.score - a.score; });
   }
 
-  /* ---- did the message name a dish? ("pizza", "fish and chips") ---- */
-  const FILLER = ["and", "with", "the", "a", "an", "of"];
-  function nameKey(text) {
-    return " " + String(text || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/)
+  /* ---- did the message ask for a dish or an ingredient? ("pizza", "fish and chips", "eggs") ---- */
+  const FILLER = ["and", "with", "the", "a", "an", "of", "up", "side", "on", "in"];
+  /* [{ raw, key }]: the words of a text without filler, and each word without a plural s. */
+  function words(text) {
+    return String(text || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/)
       .filter(function (w) { return w && FILLER.indexOf(w) === -1; })
-      .map(function (w) { return w.replace(/s$/, ""); }).join(" ") + " ";
+      .map(function (w) { return { raw: w, key: w.replace(/s$/, "") }; });
   }
-  /* Dishes whose whole name appears in the text. "steak burgers" gives Steak Burgers, not Steak. */
-  function named(text, dishes) {
-    const msg = nameKey(text);
-    const hits = dishes.filter(function (d) { return nameKey(d.name).trim() && msg.indexOf(nameKey(d.name)) !== -1; });
-    return hits.filter(function (d) {
-      return !hits.some(function (o) { return o !== d && nameKey(o.name) !== nameKey(d.name) && nameKey(o.name).indexOf(nameKey(d.name)) !== -1; });
+  function keyOf(text) { return words(text).map(function (w) { return w.key; }).join(" "); }
+
+  /* { dishes, term }. First choice: dishes whose whole name is in the text ("steak burgers" gives
+   * Steak Burgers, not Steak). Otherwise any single word (3+ letters) that is in a dish's name or is
+   * one of its ingredient tags ("eggs" gives every egg dish). term is the matched wording, for replies. */
+  function findAsked(text, dishes) {
+    const msg = words(text);
+    const msgKey = " " + keyOf(text) + " ";
+    const full = dishes.filter(function (d) { const k = keyOf(d.name); return k && msgKey.indexOf(" " + k + " ") !== -1; });
+    const whole = full.filter(function (d) {
+      return !full.some(function (o) { return o !== d && keyOf(o.name) !== keyOf(d.name) && keyOf(o.name).indexOf(keyOf(d.name)) !== -1; });
     });
+    if (whole.length) return { dishes: whole, term: whole.map(function (d) { return d.name.toLowerCase(); }).join(" or ") };
+
+    const matched = [], terms = [];
+    dishes.forEach(function (d) {
+      const keys = words(d.name).map(function (w) { return w.key; }).concat((d.tags.ingredient || []).map(function (i) { return i.replace(/s$/, ""); }));
+      msg.forEach(function (m) {
+        if (m.key.length < 3 || keys.indexOf(m.key) === -1) return;
+        if (matched.indexOf(d) === -1) matched.push(d);
+        if (terms.indexOf(m.raw) === -1) terms.push(m.raw);
+      });
+    });
+    return { dishes: matched, term: terms.join(" ") };
   }
 
   return {
     mealsForHour: mealsForHour, labelForHour: labelForHour,
     isBlocked: isBlocked, fitsMeal: fitsMeal, matchesPref: matchesPref, mergePrefs: mergePrefs,
-    pool: pool, narrow: narrow, describePrefs: describePrefs, score: score, shortlist: shortlist, explain: explain, named: named
+    pool: pool, narrow: narrow, describePrefs: describePrefs, score: score, shortlist: shortlist, explain: explain, findAsked: findAsked
   };
 })();

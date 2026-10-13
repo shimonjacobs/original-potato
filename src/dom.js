@@ -34,7 +34,8 @@ const Dom = (function () {
     const tags = o.tags
       ? '<div class="tag-row">' + t.mealType.map(function (v) { return '<span class="tag tag-meal">' + v + "</span>"; }).join("") +
         '<span class="tag tag-' + t.kosher + '">' + t.kosher + '</span><span class="tag">' + t.weight + '</span><span class="tag">' + t.temperature + "</span>" +
-        t.occasion.map(function (v) { return '<span class="tag tag-occ">' + v + "</span>"; }).join("") + "</div>" +
+        t.occasion.map(function (v) { return '<span class="tag tag-occ">' + v + "</span>"; }).join("") +
+        (t.ingredient || []).map(function (v) { return '<span class="tag tag-ing">' + esc(v) + "</span>"; }).join("") + "</div>" +
         '<div class="dish-meta">About ' + dish.prepTimeMinutes + " min</div>"
       : "";
     return '<div class="dish-card' + (o.highlight ? " highlight" : "") + (o.blocked ? " blocked" : "") + '">' + img +

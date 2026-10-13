@@ -22,11 +22,11 @@ const Dishes = (function () {
     D("cereal", "Cereal", "A bowl of cereal with cold milk.",
       { mealType: ["breakfast", "snack"], kosher: "milky", weight: "light", temperature: "cold", occasion: ["quick"] }, 2),
     D("mahash-hash", "Mahash-Hash", "Fried potato and egg omelette, cooked together until crisp and golden.",
-      { mealType: ["breakfast", "brunch"], kosher: "pareve", weight: "medium", temperature: "hot", occasion: ["comfort"] }, 20),
+      { mealType: ["breakfast", "brunch"], kosher: "pareve", weight: "medium", temperature: "hot", occasion: ["comfort"], ingredient: ["egg"] }, 20),
     D("scrambled-eggs", "Scrambled Eggs", "Soft, creamy scrambled eggs.",
-      { mealType: ["breakfast", "brunch"], kosher: "pareve", weight: "light", temperature: "hot", occasion: ["quick", "healthy"] }, 8),
+      { mealType: ["breakfast", "brunch"], kosher: "pareve", weight: "light", temperature: "hot", occasion: ["quick", "healthy"], ingredient: ["egg"] }, 8),
     D("sunny-side-up", "Sunny Side Up Eggs", "Fried eggs with a runny yolk, cooked on one side.",
-      { mealType: ["breakfast", "brunch"], kosher: "pareve", weight: "light", temperature: "hot", occasion: ["quick"] }, 6),
+      { mealType: ["breakfast", "brunch"], kosher: "pareve", weight: "light", temperature: "hot", occasion: ["quick"], ingredient: ["egg"] }, 6),
     D("toast", "Toast with Margarine", "Toasted bread with margarine.",
       { mealType: ["breakfast", "snack"], kosher: "pareve", weight: "light", temperature: "hot", occasion: ["quick"] }, 3),
     D("chicken-and-rice", "Chicken and Rice", "Simple cooked chicken served over rice.",
@@ -105,7 +105,12 @@ const Dishes = (function () {
       if (vocab.indexOf(value) === -1) { errors.push("Pick a " + label); return vocab[0]; }
       return value;
     };
+    // Free-text keywords such as "egg" or "potato": what the user's words can match besides the dish name.
+    const ingredient = (Array.isArray(t.ingredient) ? t.ingredient : [])
+      .map(function (i) { return String(i).toLowerCase().replace(/[^a-z0-9 -]/g, "").trim().slice(0, 20); })
+      .filter(function (i, n, all) { return i && all.indexOf(i) === n; }).slice(0, 8);
     const tags = {
+      ingredient: ingredient,
       mealType: subset(t.mealType, VOCAB.mealType, "meal type", true),
       kosher: single(t.kosher, VOCAB.kosher, "milky / meaty / pareve choice"),
       weight: single(t.weight, VOCAB.weight, "weight"),

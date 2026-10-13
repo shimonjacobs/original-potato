@@ -105,12 +105,27 @@ async function main() {
     p = R.mergePrefs(p, [{ dimension: "weight", value: "heavy" }, { dimension: "occasion", value: "comfort" }]);
     eq(p.map(function (x) { return x.dimension + ":" + x.value; }).sort(), ["occasion:comfort", "occasion:quick", "weight:heavy"]);
   });
-  await test("named: finds dishes by name, longest name wins", function () {
-    const all = A.Dishes.all();
-    eq(R.named("pizza please", all).map(function (d) { return d.id; }), ["pizza"]);
-    eq(R.named("steak burgers", all).map(function (d) { return d.id; }), ["steak-burgers"]);
-    eq(R.named("fish and chips", all).map(function (d) { return d.id; }), ["fish-and-chips"]);
-    eq(R.named("something quick", all), []);
+  await test("findAsked: whole dish names, longest name wins", function () {
+    const all = A.Dishes.all(), ids = function (t) { return R.findAsked(t, all).dishes.map(function (d) { return d.id; }); };
+    eq(ids("pizza please"), ["pizza"]);
+    eq(ids("steak burgers"), ["steak-burgers"]);
+    eq(ids("fish and chips"), ["fish-and-chips"]);
+    eq(ids("chips"), ["chips"], "chips should not also pull in fish and chips");
+    eq(ids("something quick"), []);
+  });
+  await test("findAsked: a single word matches names and ingredient tags, so 'eggs' finds all three egg dishes", function () {
+    const all = A.Dishes.all(), r = R.findAsked("eggs", all);
+    eq(r.dishes.map(function (d) { return d.id; }).sort(), ["mahash-hash", "scrambled-eggs", "sunny-side-up"]);
+    eq(r.term, "eggs");
+    eq(R.findAsked("something on the side", all).dishes, [], "filler words must not match");
+  });
+  await test("the three egg dishes carry an egg tag", function () {
+    ["mahash-hash", "scrambled-eggs", "sunny-side-up"].forEach(function (id) { eq(A.Dishes.byId(id).tags.ingredient, ["egg"], id); });
+  });
+  await test("validate: ingredient keywords are cleaned, and optional", function () {
+    const d = D("pareve", ["lunch"]); d.tags.ingredient = [" Egg ", "egg", "Potato!", ""];
+    eq(A.Dishes.validate(d).dish.tags.ingredient, ["egg", "potato"]);
+    ok(A.Dishes.validate(D("pareve", ["lunch"])).ok, "dish without ingredients should still be valid");
   });
 
   console.log("dishes and store");
@@ -168,11 +183,44 @@ async function main() {
     const shown = Object.keys(net.pickRequests[0].questions.pick.criteria);
     ok(shown.length > 0 && shown.every(function (id) { return app.Dishes.byId(id).tags.kosher !== "milky"; }), "milky dish reached Jev");
   });
-  await test("a named dish always reaches Jev, marked as asked for", async function () {
-    const net = fakeNet({ choose: function () { return "pizza"; } }), app = loadApp(net);
+  await test("a named dish is what gets offered, whatever the time of day", async function () {
+    const app = loadApp(fakeNet());
     const res = await app.Turn.run(app.Turn.newSession(), "pizza", { hour: 8 });
-    ok(/\[the user asked for this dish\]/.test(net.pickRequests[0].questions.pick.criteria.pizza), "pizza not flagged");
     eq(res.decision.dish.id, "pizza"); eq(res.decision.blocked, null);
+  });
+  await test("asked for eggs, then 'Not this one': still egg dishes, Jev is reminded, then it stops", async function () {
+    const net = fakeNet({ haikuFails: true }), app = loadApp(net), S2 = app.Turn.newSession();
+    const seen = [];
+    let res = await app.Turn.run(S2, "eggs", { hour: 19 });
+    seen.push(res.decision.dish.id);
+    for (let i = 0; i < 2; i++) {
+      res = await app.Turn.run(S2, "", { action: "reject", hour: 19 });
+      seen.push(res.decision.dish.id);
+    }
+    eq(seen.sort(), ["mahash-hash", "scrambled-eggs", "sunny-side-up"], "all three egg dishes, once each");
+    const later = net.pickRequests[net.pickRequests.length - 1];
+    eq(later.state.original_request, "eggs");
+    ok(Object.keys(later.questions.pick.criteria).every(function (id) { return app.Dishes.byId(id).tags.ingredient.indexOf("egg") !== -1; }), "a non-egg dish reached Jev");
+    res = await app.Turn.run(S2, "", { action: "reject", hour: 19 });
+    eq(res.decision.action, "exhausted");
+    ok(/matches "eggs"/.test(res.reply), "reply should name what ran out: " + res.reply);
+  });
+  await test("asking again for a dish they turned down brings it back", async function () {
+    const app = loadApp(fakeNet()), S2 = app.Turn.newSession();
+    await app.Turn.run(S2, "pizza", { hour: 13 });
+    await app.Turn.run(S2, "", { action: "reject", hour: 13 });
+    const again = await app.Turn.run(S2, "pizza", { hour: 13 });
+    eq(again.decision.dish.id, "pizza");
+  });
+  await test("a quick chip is not remembered as a request, but typed words are", async function () {
+    const app = loadApp(fakeNet()), S2 = app.Turn.newSession();
+    await app.Turn.run(S2, "Something quick", { chip: true, hour: 13 });
+    eq(S2.lastRequest, "");
+    await app.Turn.run(S2, "eggs", { hour: 13 });
+    eq(S2.lastRequest, "eggs");
+    eq(app.Chips.list(S2, 13).some(function (c) { return c.id === "request"; }), true);
+    app.Chips.remove(S2, "request");
+    eq([S2.lastRequest, S2.asked], ["", []]);
   });
   await test("a named milky dish while meaty is blocked, and something allowed is offered", async function () {
     const net = fakeNet(), app = loadApp(net), S2 = app.Turn.newSession();
@@ -223,10 +271,10 @@ async function main() {
     const dishes = [D("pareve", ["lunch"], { id: "a" }), D("pareve", ["lunch"], { id: "b" })];
     dishes[0].tags.temperature = "cold";
     const cold = [{ dimension: "temperature", value: "cold" }];
-    eq(R.narrow(dishes, { meaty: false, offeredIds: [], prefs: [] }).mode, "all");
-    eq(R.narrow(dishes, { meaty: false, offeredIds: [], prefs: cold }).pool.map(function (d) { return d.id; }), ["a"]);
-    eq(R.narrow(dishes, { meaty: false, offeredIds: ["a"], prefs: cold }).mode, "exhausted");
-    eq(R.narrow(dishes, { meaty: false, offeredIds: [], prefs: [{ dimension: "weight", value: "heavy" }] }).mode, "closest");
+    eq(R.narrow(dishes, { meaty: false, asked: [], offeredIds: [], prefs: [] }).mode, "all");
+    eq(R.narrow(dishes, { meaty: false, asked: [], offeredIds: [], prefs: cold }).pool.map(function (d) { return d.id; }), ["a"]);
+    eq(R.narrow(dishes, { meaty: false, asked: [], offeredIds: ["a"], prefs: cold }).mode, "exhausted");
+    eq(R.narrow(dishes, { meaty: false, asked: [], offeredIds: [], prefs: [{ dimension: "weight", value: "heavy" }] }).mode, "closest");
   });
   await test("a food not on the list is acknowledged, a listed one is not", async function () {
     const naming = { rejects_last: { noul: 0 }, names_dish: { noul: 0.95 }, kind: { choice: "none", confidence: 1 }, weight: { choice: "none", confidence: 1 }, temperature: { choice: "none", confidence: 1 } };

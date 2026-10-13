@@ -82,6 +82,7 @@ const EditorUI = (function () {
       '<form id="dish-form" class="dish-form"><h2>' + (dish ? "Edit dish" : "Add a dish") + "</h2>" +
       '<label>Name<input type="text" name="name" maxlength="60" value="' + Dom.esc(d.name) + '" /></label>' +
       '<label>Description<input type="text" name="description" maxlength="200" value="' + Dom.esc(d.description) + '" /></label>' +
+      '<label>Ingredients (optional, separated by commas, so asking for "egg" finds this dish)<input type="text" name="ingredient" value="' + Dom.esc((t.ingredient || []).join(", ")) + '" /></label>' +
       '<div class="photo-field"><h3>Photo (optional)</h3><div class="photo-row"><div id="photo-preview"></div>' +
       '<div><input type="file" id="photo-input" accept="image/*" /> <button type="button" class="secondary" id="photo-remove">Remove photo</button>' +
       '<div id="photo-msg" class="form-errors"></div></div></div></div>' +
@@ -116,7 +117,7 @@ const EditorUI = (function () {
       id: ed.editingId || "",
       image: ed.pendingImage !== undefined ? ed.pendingImage : (existing && existing.image) || "",
       name: form.elements.name.value, description: form.elements.description.value, prepTimeMinutes: form.elements.prep.value,
-      tags: { mealType: all("mealType"), occasion: all("occasion"), weight: form.elements.weight.value, temperature: form.elements.temperature.value, kosher: (form.querySelector('input[name="kosher"]:checked') || {}).value || "" }
+      tags: { mealType: all("mealType"), occasion: all("occasion"), ingredient: form.elements.ingredient.value.split(","), weight: form.elements.weight.value, temperature: form.elements.temperature.value, kosher: (form.querySelector('input[name="kosher"]:checked') || {}).value || "" }
     };
   }
 

@@ -51,25 +51,27 @@ const Picker = (function () {
     });
   }
 
-  /* candidates: the shortlist. ctx: { message, timeLabel, prefs, meals, recentlyEaten, rejected, offered, asked } (names, not ids) */
+  /* candidates: the shortlist. ctx: { message, original, timeLabel, prefs, meals, recentlyEaten, rejected, offered, asked } (dish names, not ids) */
   function pick(candidates, ctx) {
     const criteria = {};
     candidates.forEach(function (d) {
       const t = d.tags;
-      criteria[d.id] = d.name + ": " + d.description + " (" + t.kosher + ", " + t.weight + ", served " + t.temperature + ", about " + d.prepTimeMinutes + " min)" +
+      criteria[d.id] = d.name + ": " + d.description + " (" + t.kosher + ", " + t.weight + ", served " + t.temperature + ", about " + d.prepTimeMinutes + " min" +
+        (t.ingredient && t.ingredient.length ? ", contains " + t.ingredient.join(" and ") : "") + ")" +
         (ctx.meals.length && !Rules.fitsMeal(d, ctx.meals) ? " [not usually eaten at this time of day]" : "") +
-        (ctx.asked.indexOf(d.name) !== -1 ? " [the user asked for this dish]" : "");
+        (ctx.asked.indexOf(d.name) !== -1 ? " [matches what the user asked for]" : "");
     });
     const state = {
       current_time: ctx.timeLabel || "any time of day",
       user_message: ctx.message,
+      original_request: ctx.original || "none",
       stated_preferences: ctx.prefs.map(function (p) { return p.dimension + ": " + p.value; }),
       recently_eaten: ctx.recentlyEaten,
       turned_down_this_chat: ctx.rejected,
       already_offered_this_chat: ctx.offered
     };
     const questions = {
-      pick: Ai.choiceQ("Which dish best fits what this person wants to eat right now? If a dish is marked [the user asked for this dish], choose it. Otherwise prefer dishes matching their stated preferences and the time of day; choose one marked [not usually eaten at this time of day] only if nothing else fits. Dishes eaten recently are fine, just slightly less preferred than an equally good alternative.", criteria)
+      pick: Ai.choiceQ("Which dish best fits what this person wants to eat right now? original_request is what the user first asked for, and still applies if user_message is generic. If a dish is marked [matches what the user asked for], choose one of those. Otherwise prefer dishes matching their stated preferences and the time of day; choose one marked [not usually eaten at this time of day] only if nothing else fits. Dishes eaten recently are fine, just slightly less preferred than an equally good alternative.", criteria)
     };
     return Ai.jev(state, questions, "Jev: pick a dish").then(function (a) {
       const c = Ai.choice(a, "pick");

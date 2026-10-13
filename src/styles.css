@@ -98,6 +98,7 @@ nav button.active { color: var(--accent-dark); border-bottom-color: var(--accent
 .tag-meaty { background: #f6e0dc; color: #8a3b2c; }
 .tag-pareve { background: #e0f0e5; color: #2f6b45; }
 .tag-meal { background: #e5ecf7; color: #36517d; }
+.tag-ing { background: #f4ead6; color: #6b5420; }
 .dish-meta, .card-note { margin-top: 6px; font-size: 0.8rem; color: var(--muted); }
 .card-actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
 .saved { font-size: 0.85rem; color: var(--ok); }

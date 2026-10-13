@@ -106,6 +106,7 @@ nav button.active { color: var(--accent-dark); border-bottom-color: var(--accent
 .tag-meaty { background: #f6e0dc; color: #8a3b2c; }
 .tag-pareve { background: #e0f0e5; color: #2f6b45; }
 .tag-meal { background: #e5ecf7; color: #36517d; }
+.tag-ing { background: #f4ead6; color: #6b5420; }
 .dish-meta, .card-note { margin-top: 6px; font-size: 0.8rem; color: var(--muted); }
 .card-actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
 .saved { font-size: 0.85rem; color: var(--ok); }
@@ -494,11 +495,11 @@ const Dishes = (function () {
     D("cereal", "Cereal", "A bowl of cereal with cold milk.",
       { mealType: ["breakfast", "snack"], kosher: "milky", weight: "light", temperature: "cold", occasion: ["quick"] }, 2),
     D("mahash-hash", "Mahash-Hash", "Fried potato and egg omelette, cooked together until crisp and golden.",
-      { mealType: ["breakfast", "brunch"], kosher: "pareve", weight: "medium", temperature: "hot", occasion: ["comfort"] }, 20),
+      { mealType: ["breakfast", "brunch"], kosher: "pareve", weight: "medium", temperature: "hot", occasion: ["comfort"], ingredient: ["egg"] }, 20),
     D("scrambled-eggs", "Scrambled Eggs", "Soft, creamy scrambled eggs.",
-      { mealType: ["breakfast", "brunch"], kosher: "pareve", weight: "light", temperature: "hot", occasion: ["quick", "healthy"] }, 8),
+      { mealType: ["breakfast", "brunch"], kosher: "pareve", weight: "light", temperature: "hot", occasion: ["quick", "healthy"], ingredient: ["egg"] }, 8),
     D("sunny-side-up", "Sunny Side Up Eggs", "Fried eggs with a runny yolk, cooked on one side.",
-      { mealType: ["breakfast", "brunch"], kosher: "pareve", weight: "light", temperature: "hot", occasion: ["quick"] }, 6),
+      { mealType: ["breakfast", "brunch"], kosher: "pareve", weight: "light", temperature: "hot", occasion: ["quick"], ingredient: ["egg"] }, 6),
     D("toast", "Toast with Margarine", "Toasted bread with margarine.",
       { mealType: ["breakfast", "snack"], kosher: "pareve", weight: "light", temperature: "hot", occasion: ["quick"] }, 3),
     D("chicken-and-rice", "Chicken and Rice", "Simple cooked chicken served over rice.",
@@ -577,7 +578,12 @@ const Dishes = (function () {
       if (vocab.indexOf(value) === -1) { errors.push("Pick a " + label); return vocab[0]; }
       return value;
     };
+    // Free-text keywords such as "egg" or "potato": what the user's words can match besides the dish name.
+    const ingredient = (Array.isArray(t.ingredient) ? t.ingredient : [])
+      .map(function (i) { return String(i).toLowerCase().replace(/[^a-z0-9 -]/g, "").trim().slice(0, 20); })
+      .filter(function (i, n, all) { return i && all.indexOf(i) === n; }).slice(0, 8);
     const tags = {
+      ingredient: ingredient,
       mealType: subset(t.mealType, VOCAB.mealType, "meal type", true),
       kosher: single(t.kosher, VOCAB.kosher, "milky / meaty / pareve choice"),
       weight: single(t.weight, VOCAB.weight, "weight"),
@@ -744,13 +750,20 @@ const Rules = (function () {
     return fresh.length ? fresh : allowed;
   }
 
-  /* Stated preferences decide what is offered while any matching dish is left, so a
-   * "cold" request never turns into a hot dish just because the cold one was used up.
-   *   mode "all":       no preferences, so use the pool as it is
-   *   mode "match":     dishes that match every preference and haven't been offered
+  /* What the user asked for decides what is offered while any matching dish is left, so a
+   * "cold" or "eggs" request never turns into something else just because the matching
+   * dish was used up. o.asked is the ids of dishes their words matched (see findAsked).
+   *   mode "all":       nothing asked for, so use the pool as it is
+   *   mode "match":     dishes that match what they asked for and haven't been offered
    *   mode "exhausted": matching dishes exist but all were offered, so there is nothing more to suggest
    *   mode "closest":   no dish matches every preference, so rank by how many each matches */
   function narrow(dishes, o) {
+    if (o.asked.length) {
+      const wanted = dishes.filter(function (d) { return o.asked.indexOf(d.id) !== -1 && !isBlocked(d, o.meaty); });
+      const left = wanted.filter(function (d) { return o.offeredIds.indexOf(d.id) === -1; });
+      if (left.length) return { mode: "match", pool: left };
+      if (wanted.length) return { mode: "exhausted", pool: [] };
+    }
     if (!o.prefs.length) return { mode: "all", pool: pool(dishes, o) };
     const matching = dishes.filter(function (d) { return !isBlocked(d, o.meaty) && o.prefs.every(function (p) { return matchesPref(d, p); }); });
     const fresh = matching.filter(function (d) { return o.offeredIds.indexOf(d.id) === -1; });
@@ -788,26 +801,44 @@ const Rules = (function () {
     return candidates.map(function (d) { return { name: d.name, score: score(d, o) }; }).sort(function (a, b) { return b.score - a.score; });
   }
 
-  /* ---- did the message name a dish? ("pizza", "fish and chips") ---- */
-  const FILLER = ["and", "with", "the", "a", "an", "of"];
-  function nameKey(text) {
-    return " " + String(text || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/)
+  /* ---- did the message ask for a dish or an ingredient? ("pizza", "fish and chips", "eggs") ---- */
+  const FILLER = ["and", "with", "the", "a", "an", "of", "up", "side", "on", "in"];
+  /* [{ raw, key }]: the words of a text without filler, and each word without a plural s. */
+  function words(text) {
+    return String(text || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/)
       .filter(function (w) { return w && FILLER.indexOf(w) === -1; })
-      .map(function (w) { return w.replace(/s$/, ""); }).join(" ") + " ";
+      .map(function (w) { return { raw: w, key: w.replace(/s$/, "") }; });
   }
-  /* Dishes whose whole name appears in the text. "steak burgers" gives Steak Burgers, not Steak. */
-  function named(text, dishes) {
-    const msg = nameKey(text);
-    const hits = dishes.filter(function (d) { return nameKey(d.name).trim() && msg.indexOf(nameKey(d.name)) !== -1; });
-    return hits.filter(function (d) {
-      return !hits.some(function (o) { return o !== d && nameKey(o.name) !== nameKey(d.name) && nameKey(o.name).indexOf(nameKey(d.name)) !== -1; });
+  function keyOf(text) { return words(text).map(function (w) { return w.key; }).join(" "); }
+
+  /* { dishes, term }. First choice: dishes whose whole name is in the text ("steak burgers" gives
+   * Steak Burgers, not Steak). Otherwise any single word (3+ letters) that is in a dish's name or is
+   * one of its ingredient tags ("eggs" gives every egg dish). term is the matched wording, for replies. */
+  function findAsked(text, dishes) {
+    const msg = words(text);
+    const msgKey = " " + keyOf(text) + " ";
+    const full = dishes.filter(function (d) { const k = keyOf(d.name); return k && msgKey.indexOf(" " + k + " ") !== -1; });
+    const whole = full.filter(function (d) {
+      return !full.some(function (o) { return o !== d && keyOf(o.name) !== keyOf(d.name) && keyOf(o.name).indexOf(keyOf(d.name)) !== -1; });
     });
+    if (whole.length) return { dishes: whole, term: whole.map(function (d) { return d.name.toLowerCase(); }).join(" or ") };
+
+    const matched = [], terms = [];
+    dishes.forEach(function (d) {
+      const keys = words(d.name).map(function (w) { return w.key; }).concat((d.tags.ingredient || []).map(function (i) { return i.replace(/s$/, ""); }));
+      msg.forEach(function (m) {
+        if (m.key.length < 3 || keys.indexOf(m.key) === -1) return;
+        if (matched.indexOf(d) === -1) matched.push(d);
+        if (terms.indexOf(m.raw) === -1) terms.push(m.raw);
+      });
+    });
+    return { dishes: matched, term: terms.join(" ") };
   }
 
   return {
     mealsForHour: mealsForHour, labelForHour: labelForHour,
     isBlocked: isBlocked, fitsMeal: fitsMeal, matchesPref: matchesPref, mergePrefs: mergePrefs,
-    pool: pool, narrow: narrow, describePrefs: describePrefs, score: score, shortlist: shortlist, explain: explain, named: named
+    pool: pool, narrow: narrow, describePrefs: describePrefs, score: score, shortlist: shortlist, explain: explain, findAsked: findAsked
   };
 })();
 
@@ -970,25 +1001,27 @@ const Picker = (function () {
     });
   }
 
-  /* candidates: the shortlist. ctx: { message, timeLabel, prefs, meals, recentlyEaten, rejected, offered, asked } (names, not ids) */
+  /* candidates: the shortlist. ctx: { message, original, timeLabel, prefs, meals, recentlyEaten, rejected, offered, asked } (dish names, not ids) */
   function pick(candidates, ctx) {
     const criteria = {};
     candidates.forEach(function (d) {
       const t = d.tags;
-      criteria[d.id] = d.name + ": " + d.description + " (" + t.kosher + ", " + t.weight + ", served " + t.temperature + ", about " + d.prepTimeMinutes + " min)" +
+      criteria[d.id] = d.name + ": " + d.description + " (" + t.kosher + ", " + t.weight + ", served " + t.temperature + ", about " + d.prepTimeMinutes + " min" +
+        (t.ingredient && t.ingredient.length ? ", contains " + t.ingredient.join(" and ") : "") + ")" +
         (ctx.meals.length && !Rules.fitsMeal(d, ctx.meals) ? " [not usually eaten at this time of day]" : "") +
-        (ctx.asked.indexOf(d.name) !== -1 ? " [the user asked for this dish]" : "");
+        (ctx.asked.indexOf(d.name) !== -1 ? " [matches what the user asked for]" : "");
     });
     const state = {
       current_time: ctx.timeLabel || "any time of day",
       user_message: ctx.message,
+      original_request: ctx.original || "none",
       stated_preferences: ctx.prefs.map(function (p) { return p.dimension + ": " + p.value; }),
       recently_eaten: ctx.recentlyEaten,
       turned_down_this_chat: ctx.rejected,
       already_offered_this_chat: ctx.offered
     };
     const questions = {
-      pick: Ai.choiceQ("Which dish best fits what this person wants to eat right now? If a dish is marked [the user asked for this dish], choose it. Otherwise prefer dishes matching their stated preferences and the time of day; choose one marked [not usually eaten at this time of day] only if nothing else fits. Dishes eaten recently are fine, just slightly less preferred than an equally good alternative.", criteria)
+      pick: Ai.choiceQ("Which dish best fits what this person wants to eat right now? original_request is what the user first asked for, and still applies if user_message is generic. If a dish is marked [matches what the user asked for], choose one of those. Otherwise prefer dishes matching their stated preferences and the time of day; choose one marked [not usually eaten at this time of day] only if nothing else fits. Dishes eaten recently are fine, just slightly less preferred than an equally good alternative.", criteria)
     };
     return Ai.jev(state, questions, "Jev: pick a dish").then(function (a) {
       const c = Ai.choice(a, "pick");
@@ -1008,10 +1041,13 @@ const Picker = (function () {
  * is told exactly which dish to mention; the template below is used when Haiku
  * is unavailable. Replies are kept short, neutral and free of pressure. */
 const Wording = (function () {
-  /* decision: { action: "recommend" | "exhausted" | "nothing", dish, blocked, rejectedPrevious, notOnList, closest, prefsText, timeLabel } */
+  /* decision: { action: "recommend" | "exhausted" | "nothing", dish, blocked, rejectedPrevious, notOnList, closest, prefsText, askedLabel, timeLabel } */
   function template(d) {
     if (d.action === "nothing") return "Everything on your list has dairy, and meaty is on. You can switch meaty off if you're ready.";
-    if (d.action === "exhausted") return "That's everything on your list that is " + d.prefsText + ". Want to see anything else, or choose from the list?";
+    if (d.action === "exhausted") {
+      const what = d.askedLabel ? "matches \"" + d.askedLabel + "\"" + (d.prefsText ? " and is " + d.prefsText : "") : "is " + d.prefsText;
+      return "That's everything on your list that " + what + ". Want to see anything else, or choose from the list?";
+    }
     let lead = "";
     if (d.blocked) lead = d.blocked.name + " has dairy, and meaty is on. ";
     else if (d.notOnList) lead = "That isn't on your list. ";
@@ -1030,7 +1066,7 @@ const Wording = (function () {
     "- If blocked is set, the user asked for that dish but it has dairy and they are meaty right now. Say so in a few words, then suggest dish.name instead. Do not lecture.",
     "- If notOnList is true, the user asked for a food that isn't on their list: say so in a few words, then suggest dish.name.",
     "- If closest is true, nothing on their list is exactly prefsText: say that in a few words and present dish.name as the closest.",
-    "- If action is \"exhausted\", there is no dish: say that is everything on their list that is prefsText, and ask if they would like to see anything else or choose from the list. Do not suggest a dish.",
+    "- If action is \"exhausted\", there is no dish: say that is everything on their list that matches askedLabel (if given) and is prefsText (if given), and ask if they would like to see anything else or choose from the list. Do not suggest a dish.",
     "- If action is \"nothing\", say everything on their list has dairy and meaty is on, and that they can switch meaty off.",
     "- If timeLabel is null, do not mention the time of day.",
     "- Never mention the engine, JSON, or probabilities."
@@ -1038,7 +1074,7 @@ const Wording = (function () {
 
   function forModel(d) {
     return { action: d.action, dish: d.dish ? { name: d.dish.name, description: d.dish.description } : null, blocked: d.blocked ? d.blocked.name : null, rejectedPrevious: !!d.rejectedPrevious,
-      notOnList: !!d.notOnList, closest: !!d.closest, prefsText: d.prefsText || null, timeLabel: d.timeLabel || null };
+      notOnList: !!d.notOnList, closest: !!d.closest, prefsText: d.prefsText || null, askedLabel: d.askedLabel || null, timeLabel: d.timeLabel || null };
   }
 
   /* history: [{ role, content }] ending with the user's turn. */
@@ -1067,10 +1103,14 @@ const Wording = (function () {
  * { action: "exhausted" } with no dish instead of offering something they ruled out. */
 const Turn = (function () {
   function newSession() {
-    return { history: [], meaty: false, ignoreTime: false, prefs: [], offeredIds: [], rejectedIds: [], lastDish: null };
+    return {
+      history: [], meaty: false, ignoreTime: false, prefs: [], offeredIds: [], rejectedIds: [], lastDish: null,
+      lastRequest: "",  // the last thing they typed, kept so "Not this one" still knows what they wanted
+      asked: [], askedLabel: ""  // ids of the dishes their words matched ("eggs" gives every egg dish), and the wording
+    };
   }
 
-  /* opts: { action: "open" (the I'm hungry button) | "reject" | "refresh" (omit for typed text), hour, rng } */
+  /* opts: { action: "open" (the I'm hungry button) | "reject" | "refresh" (omit for typed text), chip (text came from a quick chip), hour, rng } */
   async function run(S, text, opts) {
     opts = opts || {};
     const hour = typeof opts.hour === "number" ? opts.hour : new Date().getHours();
@@ -1099,7 +1139,7 @@ const Turn = (function () {
 
     S.history.push({ role: "user", content: text || (rejectsLast ? "Not this one." : opts.action === "open" ? "I'm hungry." : "(suggest something)") });
 
-    // 1. Jev reads typed words into soft preferences.
+    // 1. Jev reads typed words into preferences.
     if (text && linkUp) {
       try {
         const intent = await Picker.readText({ message: text, timeLabel: timeLabel, lastDishName: S.lastDish ? S.lastDish.name : null });
@@ -1111,34 +1151,45 @@ const Turn = (function () {
     }
     if (rejectsLast && S.lastDish && S.rejectedIds.indexOf(S.lastDish.id) === -1) S.rejectedIds.push(S.lastDish.id);
 
-    // 2. Rules: what is allowed, and a ranked shortlist.
+    // 2. Remember what they asked for. A new request that names dishes or ingredients replaces the
+    //    old one; a request for a food that isn't on the list clears it. Either way "Not this one"
+    //    keeps working from the current request.
+    const typed = text ? Rules.findAsked(text, dishes) : { dishes: [], term: "" };
+    if (typed.dishes.length) {
+      S.asked = typed.dishes.map(function (d) { return d.id; });
+      S.askedLabel = typed.term;
+      // asking for a dish again after turning it down counts as changing their mind
+      S.offeredIds = S.offeredIds.filter(function (id) { return S.asked.indexOf(id) === -1; });
+      S.rejectedIds = S.rejectedIds.filter(function (id) { return S.asked.indexOf(id) === -1; });
+    } else if (namesDish) { S.asked = []; S.askedLabel = ""; }
+    if (text && !opts.chip) S.lastRequest = text;
+
+    // 3. Rules: what is allowed, and a ranked shortlist.
     const recentIds = Store.recentEaten().map(function (e) { return e.id; });
     const rank = { prefs: S.prefs, meals: meals, recentIds: recentIds };
-    const asked = text ? Rules.named(text, dishes) : [];
-    const blocked = asked.filter(function (d) { return Rules.isBlocked(d, S.meaty); })[0] || null;
-    const askedOk = asked.filter(function (d) { return !Rules.isBlocked(d, S.meaty); });
-    const base = { meaty: S.meaty, offeredIds: S.offeredIds, prefs: S.prefs };
-    let narrowed = Rules.narrow(dishes, base);
-    if (narrowed.mode === "exhausted" && askedOk.length) narrowed = { mode: "all", pool: Rules.pool(dishes, base) }; // they named a dish, so there is something to offer
+    const askedDishes = S.asked.map(Dishes.byId).filter(Boolean);
+    const askedOk = askedDishes.filter(function (d) { return !Rules.isBlocked(d, S.meaty); });
+    const blocked = typed.dishes.length && !askedOk.length ? askedDishes[0] : null; // they asked for something the meaty rule blocks
+    const narrowed = Rules.narrow(dishes, { meaty: S.meaty, offeredIds: S.offeredIds, prefs: S.prefs, asked: askedOk.map(function (d) { return d.id; }) });
     const pool = narrowed.pool;
     const prefsText = Rules.describePrefs(S.prefs);
     Debug.step("Rules", pool.length ? "ok" : "warn", narrowed.mode + ": " + pool.length + " of " + dishes.length + " dishes allowed" + (S.meaty ? " (meaty: no milky dishes)" : ""),
-      { meaty: S.meaty, mode: narrowed.mode, ranking: Rules.explain(pool, rank).slice(0, 20), asked: asked.map(function (d) { return d.name; }), blocked: blocked ? blocked.name : null });
+      { meaty: S.meaty, mode: narrowed.mode, ranking: Rules.explain(pool, rank).slice(0, 20), asked: askedDishes.map(function (d) { return d.name; }), askedLabel: S.askedLabel, blocked: blocked ? blocked.name : null });
 
     // Nothing more matches what they asked for: say so, don't offer something they ruled out.
-    if (narrowed.mode === "exhausted") return finish(S, { action: "exhausted", timeLabel: timeLabel, prefsText: prefsText }, errors, linkUp);
+    if (narrowed.mode === "exhausted") return finish(S, { action: "exhausted", timeLabel: timeLabel, prefsText: prefsText, askedLabel: S.askedLabel }, errors, linkUp);
     if (!pool.length) return finish(S, { action: "nothing", timeLabel: timeLabel }, errors, linkUp);
 
-    let shortlist = Rules.shortlist(pool, rank, Config.MAX_CANDIDATES, opts.rng);
-    askedOk.forEach(function (d) { if (shortlist.indexOf(d) === -1) shortlist.push(d); }); // a dish they named always reaches Jev
+    const shortlist = Rules.shortlist(pool, rank, Config.MAX_CANDIDATES, opts.rng);
 
-    // 3. Jev picks.
+    // 4. Jev picks.
     let pick = null;
     if (shortlist.length === 1) pick = { id: shortlist[0].id, confidence: 1, others: [] };
     else if (linkUp) {
       try {
         pick = await Picker.pick(shortlist, {
-          message: text || "Suggest something.", timeLabel: timeLabel, prefs: S.prefs, meals: meals, asked: askedOk.map(function (d) { return d.name; }),
+          message: text || "Suggest something.", original: S.lastRequest, timeLabel: timeLabel, prefs: S.prefs, meals: meals,
+          asked: narrowed.mode === "match" && askedOk.length ? shortlist.map(function (d) { return d.name; }) : [],
           recentlyEaten: recentIds.map(Dishes.nameOf), rejected: S.rejectedIds.map(Dishes.nameOf), offered: S.offeredIds.map(Dishes.nameOf)
         });
         Debug.step("Jev's pick", "ok", Dishes.nameOf(pick.id) + " at " + Math.round(pick.confidence * 100) + "% confidence", pick);
@@ -1151,7 +1202,7 @@ const Turn = (function () {
     S.lastDish = dish;
     return finish(S, {
       action: "recommend", dish: dish, blocked: blocked, rejectedPrevious: rejectsLast, timeLabel: timeLabel,
-      notOnList: namesDish && !asked.length, closest: narrowed.mode === "closest", prefsText: prefsText,
+      notOnList: namesDish && !typed.dishes.length, closest: narrowed.mode === "closest", prefsText: prefsText,
       confidence: pick.confidence, runnersUp: pick.others.map(Dishes.byId),
       offerList: S.rejectedIds.length >= Config.REJECTS_BEFORE_LIST
     }, errors, linkUp);
@@ -1206,6 +1257,10 @@ const Chips = (function () {
       ? { id: "time", label: "Time of day ignored", restore: true, hint: "Click to use the time of day again" }
       : { id: "time", label: "It's " + Rules.labelForHour(clock), hint: "Remove it to stop favouring dishes for this time of day." }];
     if (S.meaty) chips.push({ id: "meaty", label: "Meaty: no milky dishes", hard: true, hint: "The only hard rule. Remove it once you can have dairy again." });
+    if (S.lastRequest) {
+      const said = S.lastRequest.length > 40 ? S.lastRequest.slice(0, 40) + "…" : S.lastRequest;
+      chips.push({ id: "request", label: "You asked: \"" + said + "\"", hint: "Kept for \"Not this one\" and used when picking. Remove to forget it." });
+    }
     S.prefs.forEach(function (p) { chips.push({ id: "pref:" + p.dimension + ":" + p.value, label: prefLabel(p), hint: p.src === "jev" ? "Picked up from your message. Remove it if it's wrong." : "You said this" }); });
     const offered = S.offeredIds.filter(function (id) { return Dishes.byId(id); });
     if (offered.some(function (id) { return S.rejectedIds.indexOf(id) === -1; })) {
@@ -1224,6 +1279,7 @@ const Chips = (function () {
   function remove(S, id) {
     if (id === "time") { S.ignoreTime = !S.ignoreTime; return true; }
     if (id === "meaty") { S.meaty = false; return true; }
+    if (id === "request") { S.lastRequest = ""; S.asked = []; S.askedLabel = ""; return true; }
     if (id === "offered") { S.offeredIds = S.offeredIds.filter(function (x) { return S.rejectedIds.indexOf(x) !== -1; }); return true; } // turned-down dishes stay excluded
     if (id.indexOf("rej:") === 0) {
       const dishId = id.slice(4);
@@ -1282,7 +1338,8 @@ const Dom = (function () {
     const tags = o.tags
       ? '<div class="tag-row">' + t.mealType.map(function (v) { return '<span class="tag tag-meal">' + v + "</span>"; }).join("") +
         '<span class="tag tag-' + t.kosher + '">' + t.kosher + '</span><span class="tag">' + t.weight + '</span><span class="tag">' + t.temperature + "</span>" +
-        t.occasion.map(function (v) { return '<span class="tag tag-occ">' + v + "</span>"; }).join("") + "</div>" +
+        t.occasion.map(function (v) { return '<span class="tag tag-occ">' + v + "</span>"; }).join("") +
+        (t.ingredient || []).map(function (v) { return '<span class="tag tag-ing">' + esc(v) + "</span>"; }).join("") + "</div>" +
         '<div class="dish-meta">About ' + dish.prepTimeMinutes + " min</div>"
       : "";
     return '<div class="dish-card' + (o.highlight ? " highlight" : "") + (o.blocked ? " blocked" : "") + '">' + img +
@@ -1397,7 +1454,8 @@ const ChatUI = (function () {
     if (action === "eat") App.eat(btn);
     else if (action === "list") App.showPage("browse-page");
     else if (action === "anything") {
-      App.session().prefs = [];
+      const S = App.session();
+      S.prefs = []; S.lastRequest = ""; S.asked = []; S.askedLabel = "";
       btn.closest(".card-actions").remove();
       bubble("user", "Show me anything.");
       send("", { action: "open" });
@@ -1451,7 +1509,7 @@ const ChatUI = (function () {
       c.addEventListener("click", function () {
         if (busy) return;
         bubble("user", c.getAttribute("data-text"));
-        send(c.getAttribute("data-text"));
+        send(c.getAttribute("data-text"), { chip: true });
       });
     });
   }
@@ -1632,6 +1690,7 @@ const EditorUI = (function () {
       '<form id="dish-form" class="dish-form"><h2>' + (dish ? "Edit dish" : "Add a dish") + "</h2>" +
       '<label>Name<input type="text" name="name" maxlength="60" value="' + Dom.esc(d.name) + '" /></label>' +
       '<label>Description<input type="text" name="description" maxlength="200" value="' + Dom.esc(d.description) + '" /></label>' +
+      '<label>Ingredients (optional, separated by commas, so asking for "egg" finds this dish)<input type="text" name="ingredient" value="' + Dom.esc((t.ingredient || []).join(", ")) + '" /></label>' +
       '<div class="photo-field"><h3>Photo (optional)</h3><div class="photo-row"><div id="photo-preview"></div>' +
       '<div><input type="file" id="photo-input" accept="image/*" /> <button type="button" class="secondary" id="photo-remove">Remove photo</button>' +
       '<div id="photo-msg" class="form-errors"></div></div></div></div>' +
@@ -1666,7 +1725,7 @@ const EditorUI = (function () {
       id: ed.editingId || "",
       image: ed.pendingImage !== undefined ? ed.pendingImage : (existing && existing.image) || "",
       name: form.elements.name.value, description: form.elements.description.value, prepTimeMinutes: form.elements.prep.value,
-      tags: { mealType: all("mealType"), occasion: all("occasion"), weight: form.elements.weight.value, temperature: form.elements.temperature.value, kosher: (form.querySelector('input[name="kosher"]:checked') || {}).value || "" }
+      tags: { mealType: all("mealType"), occasion: all("occasion"), ingredient: form.elements.ingredient.value.split(","), weight: form.elements.weight.value, temperature: form.elements.temperature.value, kosher: (form.querySelector('input[name="kosher"]:checked') || {}).value || "" }
     };
   }
 

@@ -99,7 +99,8 @@ const ChatUI = (function () {
     if (action === "eat") App.eat(btn);
     else if (action === "list") App.showPage("browse-page");
     else if (action === "anything") {
-      App.session().prefs = [];
+      const S = App.session();
+      S.prefs = []; S.lastRequest = ""; S.asked = []; S.askedLabel = "";
       btn.closest(".card-actions").remove();
       bubble("user", "Show me anything.");
       send("", { action: "open" });
@@ -153,7 +154,7 @@ const ChatUI = (function () {
       c.addEventListener("click", function () {
         if (busy) return;
         bubble("user", c.getAttribute("data-text"));
-        send(c.getAttribute("data-text"));
+        send(c.getAttribute("data-text"), { chip: true });
       });
     });
   }

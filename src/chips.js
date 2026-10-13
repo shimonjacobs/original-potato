@@ -23,6 +23,10 @@ const Chips = (function () {
       ? { id: "time", label: "Time of day ignored", restore: true, hint: "Click to use the time of day again" }
       : { id: "time", label: "It's " + Rules.labelForHour(clock), hint: "Remove it to stop favouring dishes for this time of day." }];
     if (S.meaty) chips.push({ id: "meaty", label: "Meaty: no milky dishes", hard: true, hint: "The only hard rule. Remove it once you can have dairy again." });
+    if (S.lastRequest) {
+      const said = S.lastRequest.length > 40 ? S.lastRequest.slice(0, 40) + "…" : S.lastRequest;
+      chips.push({ id: "request", label: "You asked: \"" + said + "\"", hint: "Kept for \"Not this one\" and used when picking. Remove to forget it." });
+    }
     S.prefs.forEach(function (p) { chips.push({ id: "pref:" + p.dimension + ":" + p.value, label: prefLabel(p), hint: p.src === "jev" ? "Picked up from your message. Remove it if it's wrong." : "You said this" }); });
     const offered = S.offeredIds.filter(function (id) { return Dishes.byId(id); });
     if (offered.some(function (id) { return S.rejectedIds.indexOf(id) === -1; })) {
@@ -41,6 +45,7 @@ const Chips = (function () {
   function remove(S, id) {
     if (id === "time") { S.ignoreTime = !S.ignoreTime; return true; }
     if (id === "meaty") { S.meaty = false; return true; }
+    if (id === "request") { S.lastRequest = ""; S.asked = []; S.askedLabel = ""; return true; }
     if (id === "offered") { S.offeredIds = S.offeredIds.filter(function (x) { return S.rejectedIds.indexOf(x) !== -1; }); return true; } // turned-down dishes stay excluded
     if (id.indexOf("rej:") === 0) {
       const dishId = id.slice(4);
