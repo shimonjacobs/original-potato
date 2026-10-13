@@ -142,6 +142,17 @@ async function main() {
     eq(app.Store.flag("chips", true), false);
   });
 
+  await test("chips show offered and turned-down dishes, and removing them changes the real state", function () {
+    const app = loadApp(fakeNet()), S2 = app.Turn.newSession();
+    S2.offeredIds = ["pizza", "chips"]; S2.rejectedIds = ["pizza"];
+    const ids = app.Chips.list(S2, 13).map(function (c) { return c.id; });
+    ok(ids.indexOf("offered") !== -1 && ids.indexOf("rej:pizza") !== -1, "chips missing");
+    app.Chips.remove(S2, "offered");
+    eq(S2.offeredIds, ["pizza"], "turned-down dish must stay excluded");
+    app.Chips.remove(S2, "rej:pizza");
+    eq([S2.offeredIds, S2.rejectedIds], [[], []]);
+  });
+
   console.log("a chat turn (fake Jev and Haiku)");
   await test("opening gives a dish from the list, worded by Haiku", async function () {
     const net = fakeNet({ haiku: "How about Cereal?" });
