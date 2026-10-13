@@ -15,75 +15,71 @@
       <div class="title-row">
         <h1>What Should I Eat?</h1>
         <div class="title-right">
-          <button type="button" id="status-badge" class="status">Offline rules</button>
-          <button type="button" id="settings-btn" class="icon-btn" aria-label="Settings">Settings</button>
+          <button type="button" id="meaty-toggle" class="meaty-toggle" aria-pressed="false">I'm meaty</button>
+          <button type="button" id="settings-btn" class="icon-btn">Settings</button>
         </div>
       </div>
+
       <section id="settings-panel" class="settings">
         <h2>Settings</h2>
-        <div class="row settings-pages">
-          <button type="button" data-tab="edit-page" id="open-edit-btn" class="secondary">My Dishes</button>
-        </div>
-        <label for="key-input">OpenRouter key (optional)</label>
         <div class="row">
-          <input type="password" id="key-input" autocomplete="off" />
-          <button type="button" id="key-save-btn" class="primary">Save</button>
-          <button type="button" id="key-clear-btn" class="secondary">Remove saved key</button>
+          <button type="button" data-tab="edit-page" class="secondary">My Dishes</button>
         </div>
-        <p class="hint">The app uses the shared proxy by default, so no key is needed. A key pasted here overrides it and stays in this browser only. A key written into the file's config is visible to anyone who has the file.</p>
-        <div class="row">
-          <button type="button" id="test-btn" class="secondary">Test connection</button>
+        <label class="check-row"><input type="checkbox" id="chips-toggle" /> Show "What I'm using" (the things shaping my suggestions, each removable)</label>
+        <div class="row muted-row">
+          <span id="meals-note"></span>
+          <button type="button" id="meals-clear-btn" class="secondary">Forget recent meals</button>
         </div>
-        <div id="test-result" class="test-result"></div>
-        <label class="check-row"><input type="checkbox" id="debug-toggle" /> Debug mode (shows a Debug tab with what each model said and how the app decided)</label>
-        <div class="row memory-row">
-          <span id="memory-note"></span>
-          <button type="button" id="memory-clear-btn" class="secondary">Forget my history</button>
+        <div class="row muted-row">
+          <span id="suggest-status"></span>
+          <button type="button" id="retry-btn" class="secondary">Try suggestions again</button>
         </div>
+
+        <details class="dev">
+          <summary>Developer settings</summary>
+          <label class="check-row"><input type="checkbox" id="debug-toggle" /> Debug mode (adds a Debug tab showing each step, including Jev's confidence)</label>
+          <label for="key-input">OpenRouter key (optional, overrides the shared proxy, stays in this browser)</label>
+          <div class="row">
+            <input type="password" id="key-input" autocomplete="off" />
+            <button type="button" id="key-save-btn" class="primary">Save</button>
+            <button type="button" id="key-clear-btn" class="secondary">Remove saved key</button>
+          </div>
+          <div class="row">
+            <button type="button" id="export-btn" class="secondary">Export dishes</button>
+            <button type="button" id="import-btn" class="secondary">Import dishes</button>
+            <input type="file" id="import-file" accept=".json,application/json" hidden />
+          </div>
+        </details>
       </section>
+
       <nav>
         <button type="button" data-tab="chat-page" id="chat-tab-btn" class="active">Chat</button>
-        <button type="button" data-tab="browse-page">Browse Dishes</button>
-        <button type="button" data-tab="debug-page" id="debug-tab-btn" style="display:none;">Debug</button>
+        <button type="button" data-tab="browse-page" id="browse-tab-btn">Dishes</button>
+        <button type="button" data-tab="debug-page" id="debug-tab-btn">Debug</button>
       </nav>
     </header>
+
     <main class="app-main">
       <div id="chat-page" class="page active">
-       <div class="mem-bar-row">
-         <button type="button" id="mem-bar" class="mem-bar" aria-expanded="false" aria-controls="memory-panel">
-           <span class="mem-bar-title">What I'm using</span><span id="mem-count" class="mem-count">0</span><span class="mem-chevron" aria-hidden="true"></span>
-         </button>
-         <button type="button" id="mem-update-btn" class="primary mem-update" style="display:none;">Update</button>
-         <button type="button" id="mem-reset-btn" class="secondary mem-reset">Start over</button>
-       </div>
-       <div class="chat-col">
-        <div class="chat-window" id="chat-window"></div>
-        <div class="chat-error" id="chat-error" style="display:none;"></div>
-        <div class="mood-row">
-          <button type="button" class="chip chip-mood" data-text="I'm hungry">I'm hungry</button>
-          <button type="button" class="chip chip-mood" data-text="Something quick">Quick</button>
-          <button type="button" class="chip chip-mood" data-text="Something healthy">Healthy</button>
-          <button type="button" class="chip chip-mood" data-text="Comfort food please">Comfort</button>
-          <button type="button" class="chip chip-mood" data-text="Something light and cold">Light and cold</button>
-          <span class="kosher-toggle" role="group" aria-label="I'm meaty or milky">
-            <button type="button" id="kt-meaty" class="kt-btn" aria-pressed="false">I'm meaty</button>
-            <button type="button" id="kt-milky" class="kt-btn" aria-pressed="false">I'm milky</button>
-          </span>
+        <div class="chat-col">
+          <div class="chat-window" id="chat-window" data-dynamic></div>
+          <div class="mood-row">
+            <button type="button" class="chip chip-mood" data-text="Something quick">Quick</button>
+            <button type="button" class="chip chip-mood" data-text="Something healthy">Healthy</button>
+            <button type="button" class="chip chip-mood" data-text="Comfort food please">Comfort</button>
+            <button type="button" class="chip chip-mood" data-text="Something light and cold">Light and cold</button>
+          </div>
+          <form class="chat-input-row" id="chat-form">
+            <input type="text" id="chat-input" placeholder="Optional: tell me what you fancy" autocomplete="off" />
+            <button type="submit" id="chat-send-btn" class="primary">Send</button>
+            <button type="button" class="secondary" id="chat-reset-btn">Start over</button>
+          </form>
         </div>
-        <form class="chat-input-row" id="chat-form">
-          <input type="text" id="chat-input" placeholder="e.g. something quick and hot" autocomplete="off" />
-          <button type="submit" id="chat-send-btn" class="primary">Send</button>
-          <button type="button" class="secondary" id="chat-reset-btn">Start over</button>
-        </form>
-       </div>
-       <aside class="memory-panel" id="memory-panel">
-         <h2>What I'm using</h2>
-         <p class="hint">Everything shaping my suggestions. Remove anything you disagree with.</p>
-         <div id="memory-chips"></div>
-         <div id="memory-nudge" class="memory-nudge" style="display:none;">
-           Memory changed. <button type="button" class="primary" id="nudge-btn">Update suggestion</button>
-         </div>
-       </aside>
+        <aside class="chips-panel" id="chips-panel">
+          <h2>What I'm using</h2>
+          <div id="chips" class="mchips" data-dynamic></div>
+          <button type="button" class="primary" id="chips-update" hidden>Update suggestion</button>
+        </aside>
       </div>
 
       <div id="browse-page" class="page">
@@ -93,14 +89,15 @@
             <input type="text" id="search-box" class="search-box" placeholder="Search dishes…" />
             <button type="button" id="filters-toggle" class="secondary filters-toggle" aria-expanded="false">Filters</button>
           </div>
-          <div id="filter-body" class="filter-body">
-            <div id="filter-groups"></div>
+          <div class="filter-body">
+            <div id="filter-groups" data-dynamic></div>
             <button type="button" class="secondary" id="clear-filters-btn">Clear filters</button>
           </div>
         </aside>
         <section class="dish-grid-section">
-          <div id="dish-count" class="dish-count"></div>
-          <div id="dish-grid"></div>
+          <p class="offline-note">Suggestions aren't available right now. Pick anything from the list.</p>
+          <div id="dish-count" class="dish-count" data-dynamic></div>
+          <div id="dish-grid" data-dynamic></div>
         </section>
       </div>
 
@@ -108,26 +105,25 @@
         <div class="editor">
           <div class="editor-bar">
             <button type="button" id="add-dish-btn" class="primary">Add a dish</button>
-            <button type="button" id="export-btn" class="secondary">Export dishes</button>
-            <button type="button" id="import-btn" class="secondary">Import dishes</button>
-            <input type="file" id="import-file" accept=".json,application/json" hidden />
             <button type="button" id="save-copy-btn" class="secondary">Save app copy</button>
             <button type="button" id="reset-dishes-btn" class="secondary">Reset to original list</button>
-            <span id="dish-total" class="muted"></span>
+            <span id="dish-total" class="muted" data-dynamic></span>
           </div>
-          <div id="editor-message" class="editor-message"></div>
-          <div id="dish-form-wrap"></div>
-          <div id="dish-table" class="table-wrap"></div>
+          <p class="hint">Edit on this computer, then use Save app copy to make a new file for the memory stick. The stick's file is the one that counts.</p>
+          <div id="editor-message" class="editor-message" data-dynamic></div>
+          <div id="dish-form-wrap" data-dynamic></div>
+          <div id="dish-table" class="table-wrap" data-dynamic></div>
         </div>
       </div>
+
       <div id="debug-page" class="page">
         <div class="editor-bar">
           <button type="button" id="debug-copy-btn" class="secondary">Copy all</button>
           <button type="button" id="debug-download-btn" class="secondary">Download JSON</button>
           <button type="button" id="debug-clear-btn" class="secondary">Clear</button>
-          <span class="muted">Newest turn first. Keys and photos are never recorded.</span>
+          <span class="muted">Newest first. Keys and photos are never recorded.</span>
         </div>
-        <div id="debug-list"></div>
+        <div id="debug-list" data-dynamic></div>
       </div>
     </main>
   </div>
