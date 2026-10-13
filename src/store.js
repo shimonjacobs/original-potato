@@ -29,7 +29,7 @@ const Store = (function () {
     setDevKey: function (key) { return write("devKey", key || null); },
     dishes: function () { return read("dishes", null); },
     setDishes: function (list) { return write("dishes", list); },
-    flag: function (name) { return read(name, false) === true; },
+    flag: function (name, fallback) { return read(name, !!fallback) === true; },
     setFlag: function (name, on) { return write(name, !!on); },
 
     recordEaten: function (id) {

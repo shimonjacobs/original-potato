@@ -135,6 +135,13 @@ async function main() {
     eq(S.recentEaten(), []);
   });
 
+  await test("flags: the chips setting is on until switched off, debug is off until switched on", function () {
+    const app = loadApp(fakeNet());
+    eq(app.Store.flag("chips", true), true); eq(app.Store.flag("debug"), false);
+    app.Store.setFlag("chips", false);
+    eq(app.Store.flag("chips", true), false);
+  });
+
   console.log("a chat turn (fake Jev and Haiku)");
   await test("opening gives a dish from the list, worded by Haiku", async function () {
     const net = fakeNet({ haiku: "How about Cereal?" });

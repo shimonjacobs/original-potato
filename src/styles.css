@@ -63,6 +63,8 @@ nav button.active { color: var(--accent-dark); border-bottom-color: var(--accent
 .chat-bubble.user { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
 .chat-bubble.assistant { align-self: flex-start; background: var(--panel); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
 .chat-loading { color: var(--muted); font-style: italic; }
+.chat-window:empty::before { content: "Press I'm hungry and I'll suggest something."; color: var(--muted); align-self: center; margin: auto; }
+.hungry-btn { font-size: 1.15rem; padding: 14px; margin-bottom: 10px; border-radius: 12px; }
 .mood-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
 .chip { background: var(--panel); border: 1px solid var(--border); color: var(--text); border-radius: 999px; padding: 5px 12px; font-size: 0.85rem; }
 .chip:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-dark); }

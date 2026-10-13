@@ -41,7 +41,7 @@ const ChatUI = (function () {
 
   function setBusy(on) {
     busy = on;
-    document.querySelectorAll("#chat-input, #chat-send-btn, .chip-mood").forEach(function (el) { el.disabled = on; });
+    document.querySelectorAll("#chat-input, #chat-send-btn, #hungry-btn, .chip-mood").forEach(function (el) { el.disabled = on; });
     const waiting = $("thinking");
     if (on && !waiting) {
       const b = document.createElement("div");
@@ -109,16 +109,21 @@ const ChatUI = (function () {
     }
   }
 
-  function open() { send("", { action: "open" }); }
+  /* Nothing is suggested until the user asks. */
+  function hungry() {
+    if (busy) return;
+    bubble("user", "I'm hungry");
+    send("", { action: "open" });
+  }
 
   function reset() {
     $("chat-window").innerHTML = "";
     $("chips-update").hidden = true;
     renderChips();
-    open();
   }
 
   function init() {
+    $("hungry-btn").addEventListener("click", hungry);
     $("chat-form").addEventListener("submit", function (e) {
       e.preventDefault();
       const text = $("chat-input").value.trim();
@@ -145,5 +150,5 @@ const ChatUI = (function () {
     });
   }
 
-  return { init: init, open: open, reset: reset, renderChips: renderChips };
+  return { init: init, reset: reset, renderChips: renderChips };
 })();

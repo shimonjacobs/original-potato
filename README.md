@@ -6,12 +6,12 @@ One self-contained file: open `dist/food-chooser.html` in any browser. No instal
 
 ## How it works
 
-1. Opening the app gives a suggestion straight away. The user can tap **I'll have this**, **Not this one**, or optionally type what they fancy.
+1. Nothing is suggested until the user presses **I'm hungry**. Then they can tap **I'll have this**, **Not this one**, or optionally type what they fancy.
 2. **Rules** (`src/rules.js`) decide what is allowed. There is one hard rule: when **I'm meaty** is switched on (top right), milky dishes are never offered. Everything else only changes the ranking: time of day, what was asked for, and meals eaten recently (a weak nudge, never an exclusion).
 3. **Jev** (`typesafe/jev-1.13` via OpenRouter) reads typed words into preferences and picks one dish from the ranked shortlist. If the user names a dish ("pizza"), it always reaches Jev, marked as asked for. If it is blocked by the meaty rule, the reply says so and offers an **I'm not meaty now** button.
 4. **Claude Haiku** only words the reply: one dish, short and neutral. If Haiku is down, a template does it.
 5. After 3 "Not this one" the reply also offers **Choose from the list**.
-6. If Jev can't be reached (no internet, school network blocking it), the app shows just the dish list with photos, no chat. Settings has **Try suggestions again**.
+6. If Jev can't be reached (no internet, school network blocking it), the first press of I'm hungry switches the app to just the dish list with photos, no chat. Settings has **Try suggestions again**.
 
 The meaty switch is not remembered: reloading clears it, like the text box. Meals are only remembered when **I'll have this** is pressed, and only in that browser.
 
@@ -23,7 +23,7 @@ Photos can also be built in: put `images/<dish-id>.jpg` in the folder (the id is
 
 ## Settings
 
-- **Show "What I'm using"**: a row of chips showing what is shaping the suggestions; each can be removed. Off by default.
+- **Show "What I'm using"**: chips showing what is shaping the suggestions (time of day, meaty, preferences, recent meals); each can be removed. On by default, and can be switched off here.
 - **Forget recent meals.**
 - **Developer settings**: Debug mode (adds a Debug tab with every step, each Jev and Haiku request, and Jev's confidence), a manual OpenRouter key (overrides the shared proxy), and dish Export / Import as JSON.
 

@@ -55,7 +55,7 @@ const App = (function () {
     SettingsUI.init();
     ChatUI.init();
     DebugUI.init();
-    if (Ai.available()) { SettingsUI.setStatus("Suggestions on."); ChatUI.open(); }
+    if (Ai.available()) SettingsUI.setStatus("Suggestions on.");
     else goOffline("No connection is set up.");
   }
 

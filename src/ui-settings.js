@@ -19,7 +19,7 @@ const SettingsUI = (function () {
   }
 
   function applyChips() {
-    const on = Store.flag("chips");
+    const on = Store.flag("chips", true); // on unless switched off
     document.body.classList.toggle("show-chips", on);
     $("chips-toggle").checked = on;
     ChatUI.renderChips();

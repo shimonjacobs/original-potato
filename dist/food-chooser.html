@@ -71,6 +71,8 @@ nav button.active { color: var(--accent-dark); border-bottom-color: var(--accent
 .chat-bubble.user { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
 .chat-bubble.assistant { align-self: flex-start; background: var(--panel); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
 .chat-loading { color: var(--muted); font-style: italic; }
+.chat-window:empty::before { content: "Press I'm hungry and I'll suggest something."; color: var(--muted); align-self: center; margin: auto; }
+.hungry-btn { font-size: 1.15rem; padding: 14px; margin-bottom: 10px; border-radius: 12px; }
 .mood-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
 .chip { background: var(--panel); border: 1px solid var(--border); color: var(--text); border-radius: 999px; padding: 5px 12px; font-size: 0.85rem; }
 .chip:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-dark); }
@@ -276,6 +278,7 @@ nav button.active { color: var(--accent-dark); border-bottom-color: var(--accent
       <div id="chat-page" class="page active">
         <div class="chat-col">
           <div class="chat-window" id="chat-window" data-dynamic></div>
+          <button type="button" id="hungry-btn" class="primary hungry-btn">I'm hungry</button>
           <div class="mood-row">
             <button type="button" class="chip chip-mood" data-text="Something quick">Quick</button>
             <button type="button" class="chip chip-mood" data-text="Something healthy">Healthy</button>
@@ -396,7 +399,7 @@ const Store = (function () {
     setDevKey: function (key) { return write("devKey", key || null); },
     dishes: function () { return read("dishes", null); },
     setDishes: function (list) { return write("dishes", list); },
-    flag: function (name) { return read(name, false) === true; },
+    flag: function (name, fallback) { return read(name, !!fallback) === true; },
     setFlag: function (name, on) { return write(name, !!on); },
 
     recordEaten: function (id) {
@@ -1034,7 +1037,7 @@ const Turn = (function () {
     return { history: [], meaty: false, ignoreTime: false, prefs: [], offeredIds: [], rejectedIds: [], lastDish: null };
   }
 
-  /* opts: { action: "open" | "reject" | "refresh" (omit for typed text), hour, rng } */
+  /* opts: { action: "open" (the I'm hungry button) | "reject" | "refresh" (omit for typed text), hour, rng } */
   async function run(S, text, opts) {
     opts = opts || {};
     const hour = typeof opts.hour === "number" ? opts.hour : new Date().getHours();
@@ -1060,7 +1063,7 @@ const Turn = (function () {
     let rejectsLast = opts.action === "reject";
     const failed = function (step, e) { errors.push(e); if (Ai.isDead(e)) linkUp = false; Debug.step(step, "error", Ai.explain(e)); };
 
-    S.history.push({ role: "user", content: text || (rejectsLast ? "Not this one." : "(suggest something)") });
+    S.history.push({ role: "user", content: text || (rejectsLast ? "Not this one." : opts.action === "open" ? "I'm hungry." : "(suggest something)") });
 
     // 1. Jev reads typed words into soft preferences.
     if (text && linkUp) {
@@ -1277,7 +1280,7 @@ const ChatUI = (function () {
 
   function setBusy(on) {
     busy = on;
-    document.querySelectorAll("#chat-input, #chat-send-btn, .chip-mood").forEach(function (el) { el.disabled = on; });
+    document.querySelectorAll("#chat-input, #chat-send-btn, #hungry-btn, .chip-mood").forEach(function (el) { el.disabled = on; });
     const waiting = $("thinking");
     if (on && !waiting) {
       const b = document.createElement("div");
@@ -1345,16 +1348,21 @@ const ChatUI = (function () {
     }
   }
 
-  function open() { send("", { action: "open" }); }
+  /* Nothing is suggested until the user asks. */
+  function hungry() {
+    if (busy) return;
+    bubble("user", "I'm hungry");
+    send("", { action: "open" });
+  }
 
   function reset() {
     $("chat-window").innerHTML = "";
     $("chips-update").hidden = true;
     renderChips();
-    open();
   }
 
   function init() {
+    $("hungry-btn").addEventListener("click", hungry);
     $("chat-form").addEventListener("submit", function (e) {
       e.preventDefault();
       const text = $("chat-input").value.trim();
@@ -1381,7 +1389,7 @@ const ChatUI = (function () {
     });
   }
 
-  return { init: init, open: open, reset: reset, renderChips: renderChips };
+  return { init: init, reset: reset, renderChips: renderChips };
 })();
 
 
@@ -1677,7 +1685,7 @@ const SettingsUI = (function () {
   }
 
   function applyChips() {
-    const on = Store.flag("chips");
+    const on = Store.flag("chips", true); // on unless switched off
     document.body.classList.toggle("show-chips", on);
     $("chips-toggle").checked = on;
     ChatUI.renderChips();
@@ -1838,7 +1846,7 @@ const App = (function () {
     SettingsUI.init();
     ChatUI.init();
     DebugUI.init();
-    if (Ai.available()) { SettingsUI.setStatus("Suggestions on."); ChatUI.open(); }
+    if (Ai.available()) SettingsUI.setStatus("Suggestions on.");
     else goOffline("No connection is set up.");
   }
 

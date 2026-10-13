@@ -11,7 +11,7 @@ const Turn = (function () {
     return { history: [], meaty: false, ignoreTime: false, prefs: [], offeredIds: [], rejectedIds: [], lastDish: null };
   }
 
-  /* opts: { action: "open" | "reject" | "refresh" (omit for typed text), hour, rng } */
+  /* opts: { action: "open" (the I'm hungry button) | "reject" | "refresh" (omit for typed text), hour, rng } */
   async function run(S, text, opts) {
     opts = opts || {};
     const hour = typeof opts.hour === "number" ? opts.hour : new Date().getHours();
@@ -37,7 +37,7 @@ const Turn = (function () {
     let rejectsLast = opts.action === "reject";
     const failed = function (step, e) { errors.push(e); if (Ai.isDead(e)) linkUp = false; Debug.step(step, "error", Ai.explain(e)); };
 
-    S.history.push({ role: "user", content: text || (rejectsLast ? "Not this one." : "(suggest something)") });
+    S.history.push({ role: "user", content: text || (rejectsLast ? "Not this one." : opts.action === "open" ? "I'm hungry." : "(suggest something)") });
 
     // 1. Jev reads typed words into soft preferences.
     if (text && linkUp) {
